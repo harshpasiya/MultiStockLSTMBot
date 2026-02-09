@@ -48,6 +48,7 @@ if __name__ == "__main__":
 
     download_nse_data(primary_stocks,period='3y')
 
+
     # Print summary
     print("\n Data Downloaded sccessfully")
     print("next step : Run eda.py for stationary testing")
