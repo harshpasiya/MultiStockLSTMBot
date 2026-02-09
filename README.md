@@ -1,4 +1,4 @@
-# ZODIC OMEGA  
+# ZODIC OMEGA 
 Risk-First Multi-Stock LSTM Trading Engine
 
 ---
