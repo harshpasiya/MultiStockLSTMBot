@@ -152,15 +152,32 @@ def process_all_raw_data():
 
             df = pd.read_csv(
                 f"data/{file}",
+                header=[0, 1],  # IMPORTANT
                 index_col=0
             )
 
-            # Clean date column explicitly
+            # Flatten multi-level columns (remove ticker row)
+            df.columns = df.columns.get_level_values(0)
+
+            # Clean index
             df.index = pd.to_datetime(
                 df.index,
                 format="%Y-%m-%d",
                 errors="coerce"
             )
+
+            df = df[~df.index.isna()]
+            df = df[~df.index.duplicated(keep="last")]
+            df = df.sort_index()
+
+            # Force numeric conversion
+            numeric_cols = ["Open", "High", "Low", "Close", "Volume"]
+
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+
+            df = df.dropna(subset=["Close", "High", "Low", "Volume"])
 
             # Force numeric columns
             numeric_cols = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
