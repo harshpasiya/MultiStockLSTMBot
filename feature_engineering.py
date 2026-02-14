@@ -4,26 +4,20 @@ import pandas as pd
 
 
 # ============================================================
-# CONFIG (LOCK THESE UNLESS RETRAINING MODEL)
+# CONFIG
 # ============================================================
 
-RET_WINDOWS = [1, 3, 5]
-MA_WINDOWS = [10, 20]
-MFI_PERIOD = 14
-ATR_PERIOD = 14
+LOOKBACK_Z = 100
 VOL_WINDOW = 20
-VOL_CHANGE_WINDOW = 5
+MFI_PERIOD = 14
+HORIZON = 5
 
 FEATURE_ORDER = [
-    "ret_1",
-    "ret_3",
-    "ret_5",
-    "ma_dist_10",
-    "ma_dist_20",
-    "mfi_14",
-    "atr_14",
-    "rolling_vol_20",
-    "vol_change_5"
+    "ret_5_rank",
+    "ma_dist_20_rank",
+    "mfi_14_rank",
+    "rolling_vol_20_rank",
+    "vol_regime_rank"
 ]
 
 
@@ -52,89 +46,72 @@ def calculate_mfi(df, period=14):
     positive_mf = positive_flow.rolling(period).sum()
     negative_mf = negative_flow.rolling(period).sum()
 
-    money_ratio = positive_mf / negative_mf.replace(0, np.nan)
+    money_ratio = positive_mf / (negative_mf + 1e-8)
     mfi = 100 - (100 / (1 + money_ratio))
 
-    mfi = mfi.reindex(df.index)
-
-    return mfi
+    return mfi.reindex(df.index)
 
 
-def calculate_atr(df, period=14):
-    high_low = df["High"] - df["Low"]
-    high_close = np.abs(df["High"] - df["Close"].shift())
-    low_close = np.abs(df["Low"] - df["Close"].shift())
-
-    ranges = pd.concat([high_low, high_close, low_close], axis=1)
-    true_range = ranges.max(axis=1)
-
-    atr = true_range.rolling(period).mean()
-    return atr
+def rolling_zscore(series, window=100):
+    mean = series.rolling(window).mean()
+    std = series.rolling(window).std()
+    return (series - mean) / (std + 1e-8)
 
 
 # ============================================================
-# FEATURE ENGINEERING
+# FEATURE ENGINEERING (PER STOCK)
 # ============================================================
 
-def engineer_features(df):
+def engineer_features(df, ticker):
 
     df = df.copy()
 
-    # -------------------------
     # Returns
-    # -------------------------
-    for w in RET_WINDOWS:
-        df[f"ret_{w}"] = np.log(df["Close"] / df["Close"].shift(w))
+    df["ret_1"] = np.log(df["Close"] / df["Close"].shift(1))
+    df["ret_5"] = np.log(df["Close"] / df["Close"].shift(5))
 
-    # -------------------------
-    # Moving average distance
-    # -------------------------
-    for w in MA_WINDOWS:
-        ma = df["Close"].rolling(w).mean()
-        df[f"ma_dist_{w}"] = (df["Close"] - ma) / ma
+    # MA Distance
+    ma20 = df["Close"].rolling(20).mean()
+    df["ma_dist_20"] = (df["Close"] - ma20) / (ma20 + 1e-8)
 
-    # -------------------------
-    # MFI (normalized to [-1, 1])
-    # -------------------------
+    # MFI
     df["mfi_14"] = calculate_mfi(df, MFI_PERIOD)
     df["mfi_14"] = (df["mfi_14"] - 50) / 50
 
-    # -------------------------
-    # ATR (normalized)
-    # -------------------------
-    df["atr_14"] = calculate_atr(df, ATR_PERIOD)
-    df["atr_14"] = df["atr_14"] / df["Close"]
+    # Volatility
+    df["rolling_vol_20"] = df["ret_1"].rolling(VOL_WINDOW).std()
+    df["rolling_vol_50"] = df["ret_1"].rolling(50).std()
+    df["rolling_vol_200"] = df["ret_1"].rolling(200).std()
 
-    # -------------------------
-    # Rolling volatility
-    # -------------------------
-    df["rolling_vol_20"] = (
-        np.log(df["Close"] / df["Close"].shift(1))
-        .rolling(VOL_WINDOW)
-        .std()
+    df["vol_regime"] = df["rolling_vol_50"] / (df["rolling_vol_200"] + 1e-8)
+    df.drop(columns=["rolling_vol_50", "rolling_vol_200"], inplace=True)
+
+    # Forward return (NO cross-sectional logic here)
+    df["fwd_return"] = np.log(
+        df["Close"].shift(-HORIZON) / df["Close"]
     )
 
-    # -------------------------
-    # Volume change
-    # -------------------------
-    df["vol_change_5"] = (
-        df["Volume"] /
-        df["Volume"].rolling(VOL_CHANGE_WINDOW).mean()
-    )
+    # Per-stock rolling normalization
+    feature_cols = [
+        "ret_5",
+        "ma_dist_20",
+        "mfi_14",
+        "rolling_vol_20",
+        "vol_regime"
+    ]
 
-    # -------------------------
-    # Clean
-    # -------------------------
+    for col in feature_cols:
+        df[col] = rolling_zscore(df[col], LOOKBACK_Z)
+
+    df["Ticker"] = ticker
+
     df = df.dropna()
-
-    # Enforce feature order
-    df = df[FEATURE_ORDER]
 
     return df
 
 
 # ============================================================
-# MAIN LOOP (MULTI-STOCK SAFE)
+# MAIN PIPELINE
 # ============================================================
 
 def process_all_raw_data():
@@ -145,6 +122,8 @@ def process_all_raw_data():
 
     print(f"\nProcessing {len(raw_files)} stocks...\n")
 
+    all_stocks = []
+
     for file in raw_files:
         try:
             symbol = file.replace("_raw.csv", "")
@@ -152,62 +131,75 @@ def process_all_raw_data():
 
             df = pd.read_csv(
                 f"data/{file}",
-                header=[0, 1],  # IMPORTANT
+                header=[0, 1],
                 index_col=0
             )
 
-            # Flatten multi-level columns (remove ticker row)
             df.columns = df.columns.get_level_values(0)
 
-            # Clean index
-            df.index = pd.to_datetime(
-                df.index,
-                format="%Y-%m-%d",
-                errors="coerce"
-            )
-
+            df.index = pd.to_datetime(df.index, errors="coerce")
             df = df[~df.index.isna()]
             df = df[~df.index.duplicated(keep="last")]
             df = df.sort_index()
 
-            # Force numeric conversion
             numeric_cols = ["Open", "High", "Low", "Close", "Volume"]
-
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors="coerce")
 
             df = df.dropna(subset=["Close", "High", "Low", "Volume"])
 
-            # Force numeric columns
-            numeric_cols = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
-
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = (
-                        df[col]
-                        .astype(str)
-                        .str.replace(",", "", regex=False)
-                    )
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-            # Drop completely empty rows
-            df = df.dropna(subset=["Close", "High", "Low", "Volume"])
-
-            features = engineer_features(df)
+            features = engineer_features(df, symbol)
 
             if len(features) < 300:
                 print("Skipped (too few rows)")
                 continue
 
-            features.to_csv(f"data/processed/{symbol}_features.csv")
-
+            all_stocks.append(features)
             print(f"OK ({len(features)} rows)")
 
         except Exception as e:
             print(f"Error: {e}")
 
-    print("\nFeature engineering completed.\n")
+    if len(all_stocks) == 0:
+        raise ValueError("No valid stock data found.")
+
+    # ============================================================
+    # CROSS-SECTIONAL TARGET + RANKING
+    # ============================================================
+
+    print("\nApplying cross-sectional target + ranking...")
+
+    combined = pd.concat(all_stocks)
+    combined = combined.sort_index()
+
+    # Cross-sectional target (THIS IS THE CRITICAL FIX)
+    combined["target"] = combined.groupby(combined.index)["fwd_return"].transform(
+        lambda x: (x - x.mean()) / (x.std() + 1e-8)
+    )
+
+    # Cross-sectional feature ranking
+    base_features = [
+        "ret_5",
+        "ma_dist_20",
+        "mfi_14",
+        "rolling_vol_20",
+        "vol_regime"
+    ]
+
+    for col in base_features:
+        combined[col + "_rank"] = (
+            combined.groupby(combined.index)[col]
+            .rank(pct=True)
+        )
+
+    combined = combined.dropna()
+
+    combined = combined[FEATURE_ORDER + ["target", "Ticker"]]
+
+    combined.to_csv("data/processed/all_stocks_features.csv")
+
+    print("\nFeature engineering completed successfully.\n")
 
 
 if __name__ == "__main__":
