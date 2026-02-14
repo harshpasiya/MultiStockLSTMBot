@@ -9,7 +9,7 @@ from build_lstm_model import build_lstm_model
 
 
 # ============================================================
-# REPRODUCIBILITY (IMPORTANT)
+# REPRODUCIBILITY
 # ============================================================
 
 SEED = 42
@@ -38,6 +38,9 @@ BATCH_SIZE = 64
 
 print("\nLoading dataset...")
 
+if not os.path.exists(DATA_PATH):
+    raise FileNotFoundError(f"{DATA_PATH} not found.")
+
 data = np.load(DATA_PATH)
 
 X_train = data["X_train"]
@@ -46,12 +49,19 @@ y_train = data["y_train"]
 X_val = data["X_val"]
 y_val = data["y_val"]
 
-X_test = data["X_test"]
-y_test = data["y_test"]
-
 print(f"Train shape: {X_train.shape}")
 print(f"Val shape:   {X_val.shape}")
-print(f"Test shape:  {X_test.shape}")
+
+# Sanity checks
+if np.isnan(X_train).any() or np.isnan(y_train).any():
+    raise ValueError("NaNs found in training data.")
+
+if np.isnan(X_val).any() or np.isnan(y_val).any():
+    raise ValueError("NaNs found in validation data.")
+
+print("\nTarget distribution:")
+print(f"Mean y_train: {np.mean(y_train):.6f}")
+print(f"Std  y_train: {np.std(y_train):.6f}")
 
 
 # ============================================================
@@ -59,7 +69,12 @@ print(f"Test shape:  {X_test.shape}")
 # ============================================================
 
 print("\nBuilding model...")
-model = build_lstm_model()
+
+# Dynamically adjust feature size
+n_features = X_train.shape[2]
+
+model = build_lstm_model(n_features=n_features)
+
 model.summary()
 
 
@@ -112,6 +127,7 @@ history = model.fit(
     validation_data=(X_val, y_val),
     epochs=EPOCHS,
     batch_size=BATCH_SIZE,
+    shuffle=True,        # Important for pooled multi-stock data
     callbacks=[checkpoint, early_stop, reduce_lr],
     verbose=1
 )
@@ -133,18 +149,6 @@ print(f"Best model saved  → {checkpoint_path}")
 
 
 # ============================================================
-# EVALUATE ON TEST SET
-# ============================================================
-
-print("\nEvaluating on test set...")
-
-test_loss, test_mae = model.evaluate(X_test, y_test, verbose=0)
-
-print(f"Test MSE : {test_loss:.6f}")
-print(f"Test MAE : {test_mae:.6f}")
-
-
-# ============================================================
 # SAVE TRAINING CURVE
 # ============================================================
 
@@ -152,7 +156,7 @@ plt.figure(figsize=(12, 4))
 plt.plot(history.history["loss"], label="Train Loss")
 plt.plot(history.history["val_loss"], label="Validation Loss")
 plt.xlabel("Epoch")
-plt.ylabel("MSE Loss")
+plt.ylabel("Loss")
 plt.title("Training History")
 plt.legend()
 plt.grid(alpha=0.3)
