@@ -12,16 +12,15 @@ from tensorflow.keras.optimizers import Adam
 
 
 # ============================================================
-# MODEL CONFIGURATION (LOCK FOR PHASE-1)
+# MODEL CONFIGURATION
 # ============================================================
 
-LOOKBACK = 30
-N_FEATURES = 9
+LOOKBACK = 45
 
 LSTM_UNITS_1 = 64
 LSTM_UNITS_2 = 32
 
-DROPOUT_RATE = 0.2
+DROPOUT_RATE = 0.15
 DENSE_UNITS = 32
 
 LEARNING_RATE = 0.001
@@ -32,16 +31,10 @@ GRAD_CLIP_NORM = 1.0
 # MODEL BUILDER
 # ============================================================
 
-def build_lstm_model():
-    """
-    Stable multi-stock shared LSTM model.
-    Designed for 5-day forward return regression.
-    Production baseline architecture.
-    """
+def build_lstm_model(n_features):
 
-    inputs = Input(shape=(LOOKBACK, N_FEATURES), name="price_sequence")
+    inputs = Input(shape=(LOOKBACK, n_features), name="price_sequence")
 
-    # First LSTM layer
     x = LSTM(
         LSTM_UNITS_1,
         return_sequences=True,
@@ -51,7 +44,6 @@ def build_lstm_model():
     x = LayerNormalization(name="layer_norm_1")(x)
     x = Dropout(DROPOUT_RATE, name="dropout_1")(x)
 
-    # Second LSTM layer
     x = LSTM(
         LSTM_UNITS_2,
         return_sequences=False,
@@ -61,7 +53,6 @@ def build_lstm_model():
     x = LayerNormalization(name="layer_norm_2")(x)
     x = Dropout(DROPOUT_RATE, name="dropout_2")(x)
 
-    # Dense head
     x = Dense(DENSE_UNITS, activation="relu", name="dense_1")(x)
     x = Dropout(0.2, name="dropout_3")(x)
 
@@ -76,21 +67,17 @@ def build_lstm_model():
 
     model.compile(
         optimizer=optimizer,
-        loss="mse",
+        loss=tf.keras.losses.Huber(delta=0.02),
         metrics=["mae"]
     )
 
     return model
 
 
-# ============================================================
-# EXPORT TEMPLATE MODEL
-# ============================================================
-
 if __name__ == "__main__":
     os.makedirs("models", exist_ok=True)
 
-    model = build_lstm_model()
+    model = build_lstm_model(n_features=5)
     model.summary()
 
     model.save("models/zodic_omega_lstm_v1_template.keras")
