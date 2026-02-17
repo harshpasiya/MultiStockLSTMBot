@@ -26,4 +26,3 @@ def pairwise_rank_loss(y_true, y_pred):
     loss = tf.boolean_mask(loss, mask)
 
     return tf.reduce_mean(loss)
-
