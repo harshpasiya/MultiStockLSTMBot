@@ -1,41 +1,27 @@
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-import random
 
 
-class PairwiseRankingDataset(Dataset):
+class DailyRankingDataset(Dataset):
 
-    def __init__(self, grouped_data, dates, samples_per_epoch=50000):
+    def __init__(self, grouped_data, dates):
 
-        self.grouped_data = grouped_data
-        self.dates = dates
-        self.samples_per_epoch = samples_per_epoch
-
-        self.valid_dates = [
-            d for d in dates if len(grouped_data[d]) >= 2
-        ]
+        self.grouped = grouped_data
+        self.dates = [d for d in dates if len(grouped_data[d]) >= 5]
 
     def __len__(self):
-        return self.samples_per_epoch
+        return len(self.dates)
 
     def __getitem__(self, idx):
 
-        # Randomly choose a date
-        date = random.choice(self.valid_dates)
+        date = self.dates[idx]
+        stocks = self.grouped[date]
 
-        stocks = self.grouped_data[date]
+        seqs = [s["seq"] for s in stocks]
+        rets = [s["ret"] for s in stocks]
 
-        # Randomly choose two different stocks
-        i, j = random.sample(range(len(stocks)), 2)
+        seqs = torch.tensor(np.array(seqs), dtype=torch.float32)
+        rets = torch.tensor(np.array(rets), dtype=torch.float32)
 
-        A = stocks[i]
-        B = stocks[j]
-
-        seq_A = torch.tensor(A["seq"], dtype=torch.float32)
-        seq_B = torch.tensor(B["seq"], dtype=torch.float32)
-
-        label = 1.0 if A["ret"] > B["ret"] else 0.0
-        label = torch.tensor(label, dtype=torch.float32)
-
-        return seq_A, seq_B, label
+        return seqs, rets
