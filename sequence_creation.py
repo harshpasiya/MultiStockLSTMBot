@@ -35,6 +35,7 @@ def build_grouped_sequences(df):
         if len(stock_df) < LOOKBACK + HORIZON + 5:
             continue
 
+
         features = stock_df[feature_cols].values
         targets = stock_df["target"].values
         dates = stock_df.iloc[:,0].values   # date column after reset_index
