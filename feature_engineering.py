@@ -1,111 +1,229 @@
 import os
+import glob
 import numpy as np
 import pandas as pd
 
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-LOOKBACK_Z = 100
-VOL_WINDOW = 20
-MFI_PERIOD = 14
+DATA_DIR = "data"
+OUTPUT_FILE = "data/processed/all_stocks_features.csv"
 HORIZON = 5
 
-FEATURE_ORDER = [
-    "ret_5_rank",
-    "ma_dist_20_rank",
-    "mfi_14_rank",
-    "rolling_vol_20_rank",
-    "vol_regime_rank"
-]
-
 
 # ============================================================
-# INDICATORS
+# PER STOCK FEATURES
 # ============================================================
 
-def calculate_mfi(df, period=14):
-    typical_price = (df["High"] + df["Low"] + df["Close"]) / 3
-    money_flow = typical_price * df["Volume"]
+def compute_stock_features(path):
 
-    positive_flow = []
-    negative_flow = []
+    ticker = os.path.basename(path).replace("_NS_raw.csv", "")
 
-    for i in range(1, len(typical_price)):
-        if typical_price.iloc[i] > typical_price.iloc[i - 1]:
-            positive_flow.append(money_flow.iloc[i])
-            negative_flow.append(0)
-        else:
-            positive_flow.append(0)
-            negative_flow.append(money_flow.iloc[i])
+    df = pd.read_csv(path, skiprows=2)
+    df.columns = ["Date","Close","High","Low","Open","Volume"]
 
-    positive_flow = pd.Series(positive_flow, index=df.index[1:])
-    negative_flow = pd.Series(negative_flow, index=df.index[1:])
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.sort_values("Date").reset_index(drop=True)
 
-    positive_mf = positive_flow.rolling(period).sum()
-    negative_mf = negative_flow.rolling(period).sum()
+    o,h,l,c,v = df["Open"],df["High"],df["Low"],df["Close"],df["Volume"]
 
-    money_ratio = positive_mf / (negative_mf + 1e-8)
-    mfi = 100 - (100 / (1 + money_ratio))
+    ret1 = c.pct_change()
+    ret2 = c.pct_change(2)
+    ret5 = c.pct_change(5)
+    ret20 = c.pct_change(20)
+    ret60 = c.pct_change(60)
 
-    return mfi.reindex(df.index)
+    # ----- Momentum -----
+    df["ret_5"] = ret5
+    df["ret_20"] = ret20
+    df["ret_60"] = ret60
+    df["momentum_accel"] = ret5 - ret20
+    df["trend_stability"] = ret1.rolling(10).mean()/(ret1.rolling(10).std()+1e-8)
+
+    # ----- Mean Reversion -----
+    df["short_reversal"] = -ret2
+    ma20 = c.rolling(20).mean()
+    std20 = c.rolling(20).std()
+    df["price_zscore_20"] = (c-ma20)/(std20+1e-8)
+    df["intraday_reversal"] = (c-o)/((h-l)+1e-8)
+
+    # ----- Volatility -----
+    std5 = ret1.rolling(5).std()
+    std20 = ret1.rolling(20).std()
+    df["vol_expansion"] = std5/(std20+1e-8)
+
+    atr20 = (h-l).rolling(20).mean()
+    df["range_expansion"] = (h-l)/(atr20+1e-8)
+    df["gap_pressure"] = (o-c.shift(1))/(c.shift(1)+1e-8)
+
+    # ----- Liquidity -----
+    df["volume_shock"] = v/(v.rolling(20).mean()+1e-8)
+    df["dollar_volume"] = c*v
 
 
-def rolling_zscore(series, window=100):
-    mean = series.rolling(window).mean()
-    std = series.rolling(window).std()
-    return (series - mean) / (std + 1e-8)
 
-
-# ============================================================
-# FEATURE ENGINEERING (PER STOCK)
-# ============================================================
-
-def engineer_features(df, ticker):
-
-    df = df.copy()
-
-    # Returns
-    df["ret_1"] = np.log(df["Close"] / df["Close"].shift(1))
-    df["ret_5"] = np.log(df["Close"] / df["Close"].shift(5))
-
-    # MA Distance
-    ma20 = df["Close"].rolling(20).mean()
-    df["ma_dist_20"] = (df["Close"] - ma20) / (ma20 + 1e-8)
-
-    # MFI
-    df["mfi_14"] = calculate_mfi(df, MFI_PERIOD)
-    df["mfi_14"] = (df["mfi_14"] - 50) / 50
-
-    # Volatility
-    df["rolling_vol_20"] = df["ret_1"].rolling(VOL_WINDOW).std()
-    df["rolling_vol_50"] = df["ret_1"].rolling(50).std()
-    df["rolling_vol_200"] = df["ret_1"].rolling(200).std()
-
-    df["vol_regime"] = df["rolling_vol_50"] / (df["rolling_vol_200"] + 1e-8)
-    df.drop(columns=["rolling_vol_50", "rolling_vol_200"], inplace=True)
-
-    # Forward return (NO cross-sectional logic here)
-    df["fwd_return"] = np.log(
-        df["Close"].shift(-HORIZON) / df["Close"]
-    )
-
-    # Per-stock rolling normalization
-    feature_cols = [
-        "ret_5",
-        "ma_dist_20",
-        "mfi_14",
-        "rolling_vol_20",
-        "vol_regime"
-    ]
-
-    for col in feature_cols:
-        df[col] = rolling_zscore(df[col], LOOKBACK_Z)
+    # target
+    raw_fwd = c.shift(-HORIZON) / c - 1
+    df["raw_target"] = raw_fwd
 
     df["Ticker"] = ticker
 
-    df = df.dropna()
+    return df
+
+
+# ============================================================
+# MARKET CONTEXT FEATURES (NEW CORE)
+# ============================================================
+
+def add_market_context(df):
+
+    context_rows = []
+
+    for date, day in df.groupby("Date"):
+
+        d = {}
+
+        d["Date"] = date
+
+        # momentum structure
+        d["cs_momentum_median"] = day["ret_20"].median()
+        d["cs_momentum_dispersion"] = day["ret_20"].std()
+        d["cs_market_return"] = day["raw_target"].mean()
+        # volatility disagreement
+        d["cs_vol_dispersion"] = day["vol_expansion"].std()
+
+        # leadership clarity
+        winners = day["ret_5"].quantile(0.9)
+        losers = day["ret_5"].quantile(0.1)
+        d["cs_winner_loser_spread"] = winners - losers
+
+        # capital concentration
+        dv = day["dollar_volume"]
+        d["cs_volume_concentration"] = dv.max()/(dv.sum()+1e-8)
+
+        # breadth
+        d["cs_trend_breadth"] = (day["ret_20"] > 0).mean()
+
+        context_rows.append(d)
+
+    context = pd.DataFrame(context_rows)
+
+    df = df.merge(context, on="Date", how="left")
+
+    return df
+
+
+# ============================================================
+# CROSS SECTIONAL RANK NORMALIZATION
+# ============================================================
+
+def rank_normalize(df):
+
+    # -----------------------------
+    # 1) MARKET NEUTRAL TARGET
+    # -----------------------------
+    df["target"] = df["raw_target"] - df["cs_market_return"]
+
+    # -----------------------------
+    # 2) VOLATILITY NORMALIZATION
+    # -----------------------------
+    vol = (
+        df.groupby("Ticker")["raw_target"]
+        .rolling(60)
+        .std()
+        .reset_index(level=0, drop=True)
+    )
+
+    df["target"] = df["target"] / (vol + 1e-6)
+
+    # drop unstable early rows
+    df = df.replace([np.inf, -np.inf], np.nan).dropna(subset=["target"])
+
+    # -----------------------------
+    # 3) CROSS-SECTION RANK FEATURES
+    # -----------------------------
+    stock_cols = [
+        "ret_20", "ret_60", "momentum_accel", "trend_stability",
+        "short_reversal", "price_zscore_20", "intraday_reversal",
+        "vol_expansion", "range_expansion", "gap_pressure",
+        "volume_shock", "dollar_volume",
+        "rel_mom", "vol_edge", "crowding", "mom_shift_5"
+    ]
+
+    context_cols = [
+        "cs_momentum_median","cs_momentum_dispersion","cs_vol_dispersion",
+        "cs_winner_loser_spread","cs_volume_concentration","cs_trend_breadth"
+    ]
+
+    ranked_days = []
+
+    for date, day in df.groupby("Date"):
+
+        day = day.copy()
+
+        # -------------------------------------------------
+        # NEW: RELATIVE POSITION FEATURES (FIRST)
+        # -------------------------------------------------
+
+        # relative momentum vs universe median
+        day["rel_mom"] = day["ret_20"] - day["ret_20"].median()
+
+        # volatility advantage vs peers
+        day["vol_edge"] = day["vol_expansion"] - day["vol_expansion"].median()
+
+        # crowding: extremes persist more than middle
+        rank_tmp = day["ret_20"].rank(pct=True)
+        day["crowding"] = (rank_tmp - 0.5).abs()
+
+        # percentile shift (leader acceleration)
+        day = day.sort_values("Ticker")
+        day["mom_rank"] = rank_tmp.values
+        day["mom_shift_5"] = day.groupby("Ticker")["mom_rank"].diff(5)
+
+        # -------------------------------------------------
+        # NOW rank features
+        # -------------------------------------------------
+        for col in stock_cols:
+            day[col + "_rank"] = day[col].rank(pct=True)
+
+        # z-score context features across history
+        for col in context_cols:
+            mean = df[col].mean()
+            std = df[col].std() + 1e-8
+            day[col+"_rank"] = (day[col] - mean) / std
+
+        # -------------------------------------------------
+        # NEW: RELATIVE POSITION FEATURES (CRITICAL)
+        # -------------------------------------------------
+
+        # relative momentum vs universe median
+        day["rel_mom"] = day["ret_20"] - day["ret_20"].median()
+
+        # volatility advantage vs peers
+        day["vol_edge"] = day["vol_expansion"] - day["vol_expansion"].median()
+
+        # crowding: extremes persist more than middle
+        rank_tmp = day["ret_20"].rank(pct=True)
+        day["crowding"] = (rank_tmp - 0.5).abs()
+
+        # percentile shift (leader acceleration)
+        day = day.sort_values("Ticker")
+        day["mom_rank"] = rank_tmp.values
+        day["mom_shift_5"] = day.groupby("Ticker")["mom_rank"].diff(5)
+        # FINAL TARGET RANK (AFTER neutralization)
+        day["target"] = day["target"].rank(pct=True) - 0.5
+
+        ranked_days.append(day)
+
+    df = pd.concat(ranked_days)
+    # keep rows where target exists
+    df = df.dropna(subset=["target"])
+
+    # forward fill features within each stock
+    feature_cols = [c for c in df.columns if c.endswith("_rank")]
+    df[feature_cols] = df.groupby("Ticker")[feature_cols].ffill()
+
+    # remaining NaN → neutral value (0.5 rank)
+    df[feature_cols] = df[feature_cols].fillna(0.5)
+    keep = ["Date","Ticker","target"] + [c for c in df.columns if c.endswith("_rank")]
+    df = df[keep].sort_values(["Date","Ticker"])
 
     return df
 
@@ -114,93 +232,28 @@ def engineer_features(df, ticker):
 # MAIN PIPELINE
 # ============================================================
 
-def process_all_raw_data():
+def build_dataset():
 
-    os.makedirs("data/processed", exist_ok=True)
+    files = glob.glob(os.path.join(DATA_DIR,"*_NS_raw.csv"))
 
-    raw_files = [f for f in os.listdir("data") if f.endswith("_raw.csv")]
+    all_data = []
+    for f in files:
+        print("Processing",os.path.basename(f))
+        all_data.append(compute_stock_features(f))
 
-    print(f"\nProcessing {len(raw_files)} stocks...\n")
+    df = pd.concat(all_data).dropna()
 
-    all_stocks = []
+    print("Adding market context...")
+    df = add_market_context(df)
 
-    for file in raw_files:
-        try:
-            symbol = file.replace("_raw.csv", "")
-            print(f"Processing {symbol}...", end=" ", flush=True)
+    print("Ranking normalization...")
+    df = rank_normalize(df)
 
-            df = pd.read_csv(
-                f"data/{file}",
-                header=[0, 1],
-                index_col=0
-            )
+    os.makedirs("data/processed",exist_ok=True)
+    df.to_csv(OUTPUT_FILE,index=False)
 
-            df.columns = df.columns.get_level_values(0)
-
-            df.index = pd.to_datetime(df.index, errors="coerce")
-            df = df[~df.index.isna()]
-            df = df[~df.index.duplicated(keep="last")]
-            df = df.sort_index()
-
-            numeric_cols = ["Open", "High", "Low", "Close", "Volume"]
-            for col in numeric_cols:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors="coerce")
-
-            df = df.dropna(subset=["Close", "High", "Low", "Volume"])
-
-            features = engineer_features(df, symbol)
-
-            if len(features) < 300:
-                print("Skipped (too few rows)")
-                continue
-
-            all_stocks.append(features)
-            print(f"OK ({len(features)} rows)")
-
-        except Exception as e:
-            print(f"Error: {e}")
-
-    if len(all_stocks) == 0:
-        raise ValueError("No valid stock data found.")
-
-    # ============================================================
-    # CROSS-SECTIONAL TARGET + RANKING
-    # ============================================================
-
-    print("\nApplying cross-sectional target + ranking...")
-
-    combined = pd.concat(all_stocks)
-    combined = combined.sort_index()
-
-    # Cross-sectional target (THIS IS THE CRITICAL FIX)
-    combined["target"] = combined.groupby(combined.index)["fwd_return"].transform(
-        lambda x: (x - x.mean()) / (x.std() + 1e-8)
-    )
-
-    # Cross-sectional feature ranking
-    base_features = [
-        "ret_5",
-        "ma_dist_20",
-        "mfi_14",
-        "rolling_vol_20",
-        "vol_regime"
-    ]
-
-    for col in base_features:
-        combined[col + "_rank"] = (
-            combined.groupby(combined.index)[col]
-            .rank(pct=True)
-        )
-
-    combined = combined.dropna()
-
-    combined = combined[FEATURE_ORDER + ["target", "Ticker"]]
-
-    combined.to_csv("data/processed/all_stocks_features.csv")
-
-    print("\nFeature engineering completed successfully.\n")
+    print("\nSaved →",OUTPUT_FILE)
 
 
 if __name__ == "__main__":
-    process_all_raw_data()
+    build_dataset()
