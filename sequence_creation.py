@@ -1,12 +1,6 @@
-import os
 import numpy as np
 import pandas as pd
 from collections import defaultdict
-
-
-# ============================================================
-# CONFIGURATION
-# ============================================================
 
 LOOKBACK = 45
 HORIZON = 5
@@ -15,78 +9,62 @@ INPUT_FILE = "data/processed/all_stocks_features.csv"
 OUTPUT_FILE = "data/grouped_sequences.npy"
 
 
-# ============================================================
-# GROUPED SEQUENCE BUILDER (CRITICAL FOR RANKING)
-# ============================================================
-
 def build_grouped_sequences(df):
 
     grouped = defaultdict(list)
 
     feature_cols = [c for c in df.columns if c.endswith("_rank")]
 
-    # ensure correct ordering
-    df = df.sort_values(["Ticker", df.index.name])
+    df = df.sort_values(["Ticker", "Date"])
 
-    for ticker, stock_df in df.groupby("Ticker"):
+    for ticker, sdf in df.groupby("Ticker"):
 
-        stock_df = stock_df.sort_index().reset_index()
+        sdf = sdf.reset_index(drop=True)
 
-        if len(stock_df) < LOOKBACK + HORIZON + 5:
+        if len(sdf) < LOOKBACK + HORIZON + 5:
             continue
 
-        features = stock_df[feature_cols].values
-        targets = stock_df["target"].values
-        dates = stock_df.iloc[:,0].values   # date column after reset_index
+        features = sdf[feature_cols].values
+        targets = sdf["target"].values
+        dates = sdf["Date"].values
 
-        for i in range(LOOKBACK, len(stock_df) - HORIZON):
+        for i in range(LOOKBACK, len(sdf) - HORIZON):
 
-            seq = features[i - LOOKBACK:i].astype(np.float32)
-            fwd_ret = float(targets[i])
+            seq = features[i-LOOKBACK:i].astype(np.float32)
+            ret = float(targets[i])
             date = pd.Timestamp(dates[i])
+
+
 
             grouped[date].append({
                 "seq": seq,
-                "ret": fwd_ret,
+                "ret": ret,
                 "ticker": ticker
             })
 
-    return grouped
+    # remove weak cross-section days
+    cleaned = {d:v for d,v in grouped.items() if len(v) >= 10}
 
+    return cleaned
 
-# ============================================================
-# MAIN PIPELINE
-# ============================================================
 
 def build_dataset():
 
-    print("\nLoading processed multi-stock dataset...\n")
-
-    df = pd.read_csv(
-        INPUT_FILE,
-        index_col=0,
-        parse_dates=True
-    )
-
-    print(f"Total rows: {len(df)}")
-    print(f"Total stocks: {df['Ticker'].nunique()}")
+    print("Loading processed dataset...")
+    df = pd.read_csv(INPUT_FILE, parse_dates=["Date"])
 
     grouped = build_grouped_sequences(df)
 
-    print(f"\nTotal trading days created: {len(grouped)}")
+    print("Total trading days:", len(grouped))
 
-    # Diagnostics (VERY IMPORTANT)
     counts = [len(v) for v in grouped.values()]
-    print("\nStocks per day stats:")
-    print("Min :", np.min(counts))
-    print("Max :", np.max(counts))
-    print("Mean:", np.mean(counts))
-
-    os.makedirs("data", exist_ok=True)
+    print("Min stocks/day:", min(counts))
+    print("Max stocks/day:", max(counts))
+    print("Mean stocks/day:", sum(counts)/len(counts))
 
     np.save(OUTPUT_FILE, grouped, allow_pickle=True)
 
-    print(f"\nSaved → {OUTPUT_FILE}")
+    print("Saved →", OUTPUT_FILE)
 
 
 if __name__ == "__main__":
