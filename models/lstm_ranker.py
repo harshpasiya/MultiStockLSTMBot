@@ -4,44 +4,27 @@ import torch.nn.functional as F
 
 
 class ZodicLSTMRanker(nn.Module):
+    """
+    GRU-based binary classifier.
+    Processes the full 25-day sequence — NOT just the last timestep.
 
-    def __init__(self, n_features=5):
+    Output  : raw logit  (apply sigmoid during inference)
+    Loss    : FocalLoss  (defined in train_ranker.py)
+    Entry   : prob = sigmoid(model(x)) > 0.45
+    """
+
+    def __init__(self, n_features: int, hidden: int = 48):
         super().__init__()
+        self.input_norm = nn.LayerNorm(n_features)
+        self.gru  = nn.GRU(n_features, hidden, num_layers=1,
+                            batch_first=True, dropout=0.0)
+        self.drop = nn.Dropout(0.30)
+        self.fc1  = nn.Linear(hidden, 24)
+        self.fc2  = nn.Linear(24, 1)
 
-        self.lstm1 = nn.LSTM(
-            input_size=n_features,
-            hidden_size=64,
-            batch_first=True
-        )
-
-        self.norm1 = nn.LayerNorm(64)
-        self.drop1 = nn.Dropout(0.15)
-
-        self.lstm2 = nn.LSTM(
-            input_size=64,
-            hidden_size=32,
-            batch_first=True
-        )
-
-        self.norm2 = nn.LayerNorm(32)
-        self.drop2 = nn.Dropout(0.15)
-
-        self.fc1 = nn.Linear(32, 16)
-        self.fc2 = nn.Linear(16, 1)
-
-    def forward(self, x):
-
-        x, _ = self.lstm1(x)
-        x = self.norm1(x)
-        x = self.drop1(x)
-
-        x, _ = self.lstm2(x)
-        x = x[:, -1, :]   # last timestep
-
-        x = self.norm2(x)
-        x = self.drop2(x)
-
-        x = F.gelu(self.fc1(x))
-        score = self.fc2(x)
-
-        return score.squeeze(-1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.input_norm(x)           # (batch, 25, n_features)
+        _, h_n = self.gru(x)             # h_n: (1, batch, hidden)
+        h = h_n.squeeze(0)               # (batch, hidden)
+        h = self.drop(F.gelu(self.fc1(h)))
+        return self.fc2(h).squeeze(-1)   # raw logit (batch,)
