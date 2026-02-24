@@ -3,75 +3,127 @@ import numpy as np
 import pandas as pd
 from collections import defaultdict
 
-LOOKBACK    = 25
-HORIZON     = 5
+LOOKBACK    = 45        # encoder sees 45 days of history
+HORIZON     = 5         # decoder predicts 5-day path
 INPUT_FILE  = "data/processed/all_stocks_features.csv"
 OUTPUT_FILE = "data/grouped_sequences.npy"
-META_FILE   = "data/sequence_meta.npy"   # stores n_features for model auto-config
 
-def build_grouped_sequences(df):
-    grouped      = defaultdict(list)
-    feature_cols = [c for c in df.columns if c.endswith("_rank")]
+FEATURE_COLS = [
+    "ret_5", "ret_20", "momentum_skip",       # ① Momentum
+    "rsi_14", "bb_pct", "dist_ma50",          # ② Mean Reversion
+    "adx_14", "macd_hist", "trend_slope",     # ③ Trend Quality
+    "atr_pct", "vol_ratio",                   # ④ Volatility
+    "vol_spike", "obv_slope",                 # ⑤ Volume / Flow
+    "dist_52w_high", "candle_strength",       # ⑥ Structure
+    "rel_strength",                           # ⑥ Alpha
+]
+TARGET_COLS = [f"target_d{n}" for n in range(1, HORIZON + 1)]
 
-    # Ensure Date is a proper column, not index
-    df = df.reset_index(drop=True)
-    if "Date" not in df.columns:
-        raise ValueError("'Date' column missing from dataframe")
 
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
+def build_grouped_sequences(df: pd.DataFrame) -> dict:
+    """
+    Returns grouped[date] = list of dicts:
+      {
+        "seq"    : (45, 16) float32  —  encoder input (45 days of features)
+        "path"   : (5,)    float32  —  decoder target (cumulative 5-day return path)
+        "ticker" : str
+      }
+
+    Each sample is indexed by the ENTRY DATE (last encoder timestep).
+    On that date, the backtest will query the model for predictions.
+
+    path[0] = (close_t+1 / close_t) - 1   ← 1-day cumulative return
+    path[1] = (close_t+2 / close_t) - 1   ← 2-day cumulative return
+    path[2] = (close_t+3 / close_t) - 1   ← 3-day cumulative return
+    path[3] = (close_t+4 / close_t) - 1   ← 4-day cumulative return
+    path[4] = (close_t+5 / close_t) - 1   ← 5-day cumulative return
+    """
+    grouped = defaultdict(list)
 
     for ticker, stock_df in df.groupby("Ticker"):
         stock_df = stock_df.sort_values("Date").reset_index(drop=True)
+
+        # Need at least LOOKBACK + HORIZON + buffer rows
         if len(stock_df) < LOOKBACK + HORIZON + 5:
             continue
 
-        features = stock_df[feature_cols].values.astype(np.float32)
-        targets  = stock_df["target"].values
+        features = stock_df[FEATURE_COLS].values.astype(np.float32)  # (T, 16)
+        targets  = stock_df[TARGET_COLS].values.astype(np.float32)   # (T, 5)
         dates    = stock_df["Date"].values
 
         for i in range(LOOKBACK, len(stock_df) - HORIZON):
-            grouped[pd.Timestamp(dates[i])].append({
-                "seq":    features[i - LOOKBACK: i],  # (LOOKBACK, n_features)
-                "ret":    float(targets[i]),
+            seq  = features[i - LOOKBACK : i]   # (45, 16)
+            path = targets[i]                   # (5,)
+            date = pd.Timestamp(dates[i])
+
+            # Skip rows with any NaN (z-score warmup period)
+            if np.isnan(seq).any() or np.isnan(path).any():
+                continue
+
+            grouped[date].append({
+                "seq":    seq,
+                "path":   path,
                 "ticker": ticker,
             })
 
-    return grouped, feature_cols
+    return dict(grouped)
 
 
 def build_dataset():
-    print("\nLoading processed multi-stock dataset...")
-    df = pd.read_csv(
-        INPUT_FILE,
-        index_col=0,
-        parse_dates=True,
-    )
-    # Bring Date back as column if it was used as index
-    if df.index.name == "Date" or str(df.index.dtype) == "datetime64[ns]":
-        df = df.reset_index()
-    elif "Date" not in df.columns:
-        df = df.reset_index()
+    print(f"Reading: {INPUT_FILE}")
+    df = pd.read_csv(INPUT_FILE, parse_dates=["Date"])
 
-    print(f"Total rows  : {len(df)}")
-    print(f"Total stocks: {df['Ticker'].nunique()}")
+    print(f"  Rows        : {len(df):,}")
+    print(f"  Stocks      : {df['Ticker'].nunique()}")
+    print(f"  Features    : {len(FEATURE_COLS)}")
+    print(f"  Targets     : {len(TARGET_COLS)}  (path d1..d5)")
+    print(f"  LOOKBACK    : {LOOKBACK} days")
+    print()
 
-    grouped, feature_cols = build_grouped_sequences(df)
+    grouped   = build_grouped_sequences(df)
+    all_dates = sorted(grouped.keys())
+    counts    = [len(grouped[d]) for d in all_dates]
 
-    print(f"\nTotal trading days : {len(grouped)}")
-    print(f"Features per step  : {len(feature_cols)}")
-    print("Feature list:", feature_cols)
+    print(f"Grouped sequences:")
+    print(f"  Trading days: {len(all_dates)}")
+    print(f"  Date range  : {all_dates[0].date()} to {all_dates[-1].date()}")
+    print(f"  Stocks/day  : min={min(counts)}  max={max(counts)}  "
+          f"mean={np.mean(counts):.0f}")
+    print()
 
-    counts = [len(v) for v in grouped.values()]
-    print(f"\nStocks-per-day  Min:{np.min(counts)}  Max:{np.max(counts)}  "
-          f"Mean:{np.mean(counts):.1f}")
+    # Sanity check
+    mid     = all_dates[len(all_dates) // 2]
+    sample  = grouped[mid][0]
+    print(f"Sanity check (date={mid.date()}):")
+    print(f"  seq.shape   : {sample['seq'].shape}   "
+          f"expected ({LOOKBACK}, {len(FEATURE_COLS)})")
+    print(f"  path.shape  : {sample['path'].shape}   expected ({HORIZON},)")
+    print(f"  path values : {np.round(sample['path'] * 100, 2)}%")
+    print(f"  ticker      : {sample['ticker']}")
+    print()
 
-    os.makedirs("data", exist_ok=True)
+    # Train / Val / Test split preview
+    n       = len(all_dates)
+    n_train = int(0.80 * n)
+    n_val   = int(0.10 * n)
+    n_test  = n - n_train - n_val
+
+    print(f"Split preview (80 / 10 / 10):")
+    print(f"  Train : {n_train} days  "
+          f"({all_dates[0].date()} to {all_dates[n_train-1].date()})")
+    print(f"  Val   : {n_val} days  "
+          f"({all_dates[n_train].date()} to "
+          f"{all_dates[n_train + n_val - 1].date()})")
+    print(f"  Test  : {n_test} days  "
+          f"({all_dates[n_train + n_val].date()} to {all_dates[-1].date()})")
+    print()
+
+    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
     np.save(OUTPUT_FILE, grouped, allow_pickle=True)
-    np.save(META_FILE, {"n_features": len(feature_cols),
-                        "feature_names": feature_cols}, allow_pickle=True)
-    print(f"\n✓ Sequences → {OUTPUT_FILE}")
-    print(f"✓ Meta      → {META_FILE}")
+
+    size_mb = os.path.getsize(OUTPUT_FILE) / 1e6
+    print(f"✓  Saved  -> {OUTPUT_FILE}  ({size_mb:.1f} MB)")
+
 
 if __name__ == "__main__":
     build_dataset()
