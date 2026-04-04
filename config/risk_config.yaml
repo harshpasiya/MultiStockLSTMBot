@@ -1,0 +1,142 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  G.O.D.S E.Y.E — Risk Constitution Configuration               ║
+# ║  Project : MultiStockLSTMBot                                    ║
+# ║  File    : config/risk_config.yaml                              ║
+# ║                                                                  ║
+# ║  WARNING: These are HARD LIMITS — the RL agent cannot override  ║
+# ║  any threshold defined in this file. Change with extreme care.  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ── Portfolio-Level Limits ────────────────────────────────────────────────
+portfolio:
+  max_positions: 4                    # RC-08: Maximum simultaneous open positions
+  max_positions_same_sector: 2        # RC-10: Max positions in any one sector
+  max_portfolio_heat_pct: 6.0         # Total risk (sum of all SL%) at any time
+  max_drawdown_pct: 12.0              # RC-01: Kill switch drawdown threshold
+  warning_drawdown_pct: 8.0           # Warning — reduce position sizes
+  critical_drawdown_pct: 10.0         # Critical — no new trades
+
+# ── Position-Level Risk ───────────────────────────────────────────────────
+swing:
+  take_profit_pct: 4.0                # TP: 4% from entry
+  stop_loss_pct: 1.5                  # SL: 1.5% from entry
+  trailing_stop_activation_pct: 2.0   # Trailing SL activates after +2% move
+  trailing_stop_distance_pct: 0.8     # Trailing SL stays 0.8% below peak
+  max_hold_days: 15                   # Force exit after 15 trading days
+  atr_widen_threshold: 2.0            # Widen TP/SL when ATR > 2%
+  atr_widen_multiplier: 0.5           # Widen by 0.5 × ATR
+
+intraday:
+  take_profit_pct: 2.5                # TP: 2.5% from entry
+  stop_loss_pct: 0.8                  # SL: 0.8% from entry
+  trailing_stop_activation_pct: 1.5   # Trailing SL activates after +1.5% move
+  trailing_stop_distance_pct: 0.5     # Trailing SL stays 0.5% below intraday high
+  force_close_time: "15:20"           # Force close all intraday at 3:20 PM IST
+  atr_widen_threshold: 1.5
+  atr_widen_multiplier: 0.3
+
+# ── Risk Constitution Rules ───────────────────────────────────────────────
+# Each rule defines the trigger condition and system response
+risk_constitution:
+
+  RC01_max_drawdown:
+    enabled: true
+    trigger_pct: 12.0                 # Portfolio drawdown > 12%
+    action: "halt_all_trading"
+    require_manual_restart: true
+
+  RC02_single_trade_loss:
+    enabled: true
+    trigger_pct: 2.0                  # Single position loses > 2% of total portfolio
+    action: "force_close_position"
+    require_manual_restart: false
+
+  RC03_correlation_cap:
+    enabled: true
+    max_correlation: 0.75             # No 2 positions with correlation > 0.75
+    action: "reject_signal"
+
+  RC04_earnings_blackout:
+    enabled: true
+    blackout_days_before: 2           # Block entry 2 days before earnings
+    action: "reject_signal"
+
+  RC05_circuit_breaker_proximity:
+    enabled: true
+    proximity_pct: 5.0                # Stock within 5% of circuit limit
+    action: "reject_entry_tighten_stop"
+
+  RC06_market_panic:
+    enabled: true
+    vix_spike_pct: 8.0                # India VIX rises > 8% intraday
+    nifty_drop_pct: 3.0               # Nifty drops > 3% in < 30 mins
+    action: "block_intraday_signals"
+
+  RC07_liquidity_floor:
+    enabled: true
+    min_avg_daily_volume_cr: 5.0      # Min ₹5 crore average daily turnover
+    action: "exclude_from_universe"
+
+  RC08_max_positions:
+    enabled: true
+    max_positions: 4
+    action: "reject_signal"
+
+  RC09_fii_panic:
+    enabled: true
+    fii_sell_threshold_cr: 3000       # FII sells > ₹3000 crore provisional
+    action: "force_mds_minus3"
+    duration_days: 1                  # Block longs for the day + next day
+
+  RC10_sector_concentration:
+    enabled: true
+    max_per_sector: 2
+    action: "reject_signal"
+
+# ── Signal Confidence Thresholds ─────────────────────────────────────────
+signal:
+  min_confidence_threshold: 0.55     # Reject signals with confidence < 55%
+  high_confidence: 0.70
+  very_high_confidence: 0.85
+
+# ── Kelly Position Sizing ─────────────────────────────────────────────────
+kelly:
+  fraction: 0.25                      # Use quarter-Kelly (conservative)
+  max_position_pct: 18.0              # Hard cap even with very high Kelly output
+  min_position_pct: 5.0               # Minimum meaningful position size
+  confidence_to_winrate:              # Estimated win rate at confidence levels
+    very_high: 0.68
+    high: 0.63
+    medium: 0.58
+
+# ── MDS Override Rules ───────────────────────────────────────────────────
+mds_overrides:
+  "3":                                # MDS = +3 (Strong Bullish)
+    swing_size_multiplier: 1.5        # Boost swing position size
+    block_short_signals: true
+  "-3":                               # MDS = -3 (Strong Bearish)
+    block_all_long_signals: true
+    cash_preservation_mode: true
+  "-2":                               # MDS = -2 (Bearish)
+    swing_signals_require_min_confidence: 0.75
+
+# ── Drawdown Response Protocol ────────────────────────────────────────────
+drawdown_response:
+  "0-5":
+    action: "normal"
+    new_position_size_multiplier: 1.0
+  "5-8":
+    action: "caution"
+    new_position_size_multiplier: 0.5
+    tighten_trailing_stops: true
+  "8-10":
+    action: "warning"
+    allow_new_swing: false
+    allow_new_intraday: true
+  "10-12":
+    action: "critical"
+    allow_new_positions: false
+  "12+":
+    action: "kill_switch"
+    halt_all_trading: true
+    require_manual_restart: true
