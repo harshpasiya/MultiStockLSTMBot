@@ -1,0 +1,122 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║         G.O.D.S E.Y.E — Docker Infrastructure                  ║
+# ║         Project : MultiStockLSTMBot                             ║
+# ║         File    : docker-compose.yml (place in project root)    ║
+# ║                                                                  ║
+# ║  Services:                                                       ║
+# ║    1. TimescaleDB  → stores all OHLCV, options, FII/DII data    ║
+# ║    2. Redis        → real-time price cache, session data         ║
+# ║    3. Elasticsearch→ news articles, sentiment documents          ║
+# ║    4. Grafana      → monitoring dashboard (Phase 5)              ║
+# ║                                                                  ║
+# ║  Usage:                                                          ║
+# ║    Start all  : docker-compose up -d                             ║
+# ║    Stop all   : docker-compose down                              ║
+# ║    View logs  : docker-compose logs -f                           ║
+# ║    Reset all  : docker-compose down -v  (WARNING: deletes data)  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+version: "3.8"
+
+networks:
+  godseye_network:
+    driver: bridge
+
+volumes:
+  timescaledb_data:
+  redis_data:
+  elasticsearch_data:
+  grafana_data:
+
+services:
+
+  # ── 1. TIMESCALEDB ──────────────────────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: godseye_timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       godseye
+      POSTGRES_USER:     godseye_user
+      POSTGRES_PASSWORD: godseye_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    networks:
+      - godseye_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U godseye_user -d godseye"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── 2. REDIS ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: godseye_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --requirepass godseye_redis_pass
+      --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - godseye_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "godseye_redis_pass", "ping"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+
+  # ── 3. ELASTICSEARCH ────────────────────────────────────────────────────
+  elasticsearch:
+    image: elasticsearch:8.11.1
+    container_name: godseye_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    networks:
+      - godseye_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout:  10s
+      retries:  5
+
+  # ── 4. GRAFANA ──────────────────────────────────────────────────────────
+  # Access at: http://localhost:3000
+  # Login: admin / godseye_grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: godseye_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: godseye_grafana
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - godseye_network
+    depends_on:
+      - timescaledb
