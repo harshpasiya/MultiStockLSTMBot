@@ -1,0 +1,121 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  G.O.D.S E.Y.E — Model Configuration                           ║
+# ║  Project : MultiStockLSTMBot                                    ║
+# ║  File    : config/model_config.yaml                             ║
+# ║  Phase   : All phases (hyperparameters live here)               ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+# ── Universe ──────────────────────────────────────────────────────────────
+universe:
+  index: "NIFTY 500"
+  size: 500
+  min_daily_volume_cr: 5        # Exclude stocks with avg vol < ₹5 Crore (RC-07)
+
+# ── Data Windows ─────────────────────────────────────────────────────────
+data:
+  swing_lookback_days: 60       # LSTM temporal window for swing model
+  intraday_lookback_mins: 390   # LSTM temporal window for intraday (1 full day)
+  normalization_window: 252     # Rolling Z-score window (1 trading year)
+  train_start: "2019-01-01"
+  train_end:   "2023-06-30"
+  val_start:   "2023-07-01"
+  val_end:     "2024-01-31"
+  test_start:  "2024-02-01"     # Never touch until final evaluation
+
+# ── LSTM Encoder ─────────────────────────────────────────────────────────
+lstm:
+  layers: 3
+  bidirectional: true
+  hidden_dims: [256, 128, 64]
+  dropout: 0.3
+  output_dim: 64                # Output vector dimension per stock
+
+# ── Transformer Encoder ──────────────────────────────────────────────────
+transformer:
+  num_heads: 4
+  num_layers: 2
+  feedforward_dim: 512
+  dropout: 0.1
+  positional_encoding: "learnable"
+  output_dim: 128               # Output vector dimension per stock
+
+# ── Shared Embedding ─────────────────────────────────────────────────────
+embedding:
+  input_dim: 192                # lstm(64) + transformer(128)
+  output_dim: 128
+  activation: "relu"
+  layer_norm: true
+
+# ── Supervised Pre-training ──────────────────────────────────────────────
+pretraining:
+  epochs: 100
+  early_stopping_patience: 10
+  batch_size: 64                # Stocks per batch
+  learning_rate: 0.0001
+  optimizer: "adamw"
+  weight_decay: 0.01
+  lr_schedule: "cosine_annealing"
+  loss_direction_weight: 0.6    # Weight for direction (BCE) loss
+  loss_magnitude_weight: 0.4    # Weight for return magnitude (MSE) loss
+  target_val_ic: 0.03           # Minimum acceptable validation IC
+
+# ── RL Swing Agent (PPO) ─────────────────────────────────────────────────
+rl_swing:
+  algorithm: "PPO"
+  total_timesteps: 10_000_000
+  learning_rate: 0.0003
+  gamma: 0.99                   # Discount factor
+  gae_lambda: 0.95              # GAE advantage estimation
+  clip_range: 0.2               # PPO clip epsilon
+  n_steps: 2048                 # Steps before update
+  batch_size: 64
+  n_epochs: 10
+  episode_length_days: 20       # Trading days per episode
+
+# ── RL Intraday Agent (PPO) ──────────────────────────────────────────────
+rl_intraday:
+  algorithm: "PPO"
+  total_timesteps: 20_000_000
+  learning_rate: 0.0003
+  gamma: 0.95                   # Lower gamma (shorter time horizon)
+  gae_lambda: 0.90
+  clip_range: 0.2
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  episode_length_bars: 78       # 5-min bars in 1 trading day (390 mins / 5)
+
+# ── Training Environment ─────────────────────────────────────────────────
+simulation:
+  brokerage_pct: 0.0003         # 0.03% per trade
+  stt_pct: 0.001                # Securities Transaction Tax (buy+sell)
+  nse_charge_pct: 0.0000335     # NSE exchange charges
+  slippage_base_pct: 0.0005     # Base slippage 0.05%
+  slippage_volume_multiplier: 2 # Extra slippage for large orders
+  market_impact_threshold: 0.005 # 0.5% of daily volume triggers impact
+
+# ── Nightly Retraining ───────────────────────────────────────────────────
+retraining:
+  schedule: "22:30"             # IST time to start nightly retrain
+  backbone_epochs: 3            # Fine-tuning epochs (not full retrain)
+  recent_days_window: 30        # Days of recent data to focus on
+  rollback_threshold: 0.10      # Rollback if validation IC drops > 10%
+  checkpoint_keep_last: 5       # Keep last 5 checkpoints
+
+# ── FinBERT Sentiment ────────────────────────────────────────────────────
+sentiment:
+  base_model: "ProsusAI/finbert"
+  max_length: 128
+  batch_size: 32
+  inference_latency_budget_ms: 500
+  update_interval_mins: 30
+
+# ── Feature Importance ───────────────────────────────────────────────────
+pillar_weights:
+  trend: 0.20
+  msi: 0.20
+  fii_dii: 0.20
+  sentiment: 0.15
+  volatility: 0.15
+  correlation: 0.10
+  # Note: weights auto-adjusted by RL agent during training
