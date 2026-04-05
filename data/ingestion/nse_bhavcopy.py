@@ -1,49 +1,34 @@
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║         G.O.D.S E.Y.E — NSE Bhavcopy Downloader                ║
-║         File   : data/ingestion/nse_bhavcopy.py                 ║
-║         Phase  : 0 — Data Infrastructure                        ║
-║         Purpose: Downloads daily OHLCV + delivery data from NSE ║
-║                  Stores into TimescaleDB (PostgreSQL)            ║
+║         G.O.D.S E.Y.E — Daily Data Ingestion v4                ║
+║         Project : MultiStockLSTMBot                             ║
+║         File    : data/ingestion/nse_bhavcopy.py                ║
+║         Phase   : 0 — Data Infrastructure                       ║
+║                                                                  ║
+║  Data Sources:                                                   ║
+║    OHLCV      → Zerodha Kite Connect (chunked, 1800 days/call)  ║
+║    Delivery % → NSE Bhavcopy / MTO file                        ║
+║                                                                  ║
+║  Fix v4: Kite has 2000 day limit per API call.                  ║
+║          We now fetch in 1800-day chunks automatically.          ║
 ╚══════════════════════════════════════════════════════════════════╝
-
-What this file does:
---------------------
-1. Downloads NSE Bhavcopy (OHLCV) CSV for any given trading date
-2. Downloads NSE Delivery data CSV for the same date
-3. Merges both into a single clean DataFrame
-4. Filters to only Nifty 500 universe stocks (from config/universe.yaml)
-5. Validates data quality (missing values, price anomalies, volume zero)
-6. Inserts clean records into TimescaleDB
-7. Handles corporate actions — adjusts for splits/bonuses automatically
-8. Can run in BACKFILL mode (load 5 years of history) or DAILY mode
 
 Usage:
 ------
-    # Daily mode (run after 6 PM IST on any trading day)
-    python -m data.ingestion.nse_bhavcopy --mode daily
-
-    # Backfill mode (load full history — run once during Phase 0 setup)
+    # One-time 5-year backfill
     python -m data.ingestion.nse_bhavcopy --mode backfill --start 2019-01-01
 
-    # Single date (for testing or gap-filling)
+    # Daily update after market close
+    python -m data.ingestion.nse_bhavcopy --mode daily
+
+    # Single date for testing
     python -m data.ingestion.nse_bhavcopy --mode single --date 2024-03-15
-
-NSE Data Sources:
------------------
-    Bhavcopy  : https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_<DATE>_F_0000.csv.zip
-    Delivery  : https://www.nseindia.com/archives/equities/mto/MT<DATE>.DAT
-    Both are free, no authentication required.
-
-Dependencies:
--------------
-    pip install requests pandas psycopg2-binary pyyaml loguru python-dotenv
 """
 
 import os
 import io
+import json
 import time
-import zipfile
 import argparse
 import requests
 import pandas as pd
@@ -55,142 +40,80 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 from loguru import logger
 from dotenv import load_dotenv
+from kiteconnect import KiteConnect
 
-# ── Load environment variables from .env ──────────────────────────────────
 load_dotenv()
 
+# ── Logger ────────────────────────────────────────────────────────────────
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(exist_ok=True)
+logger.add(
+    LOG_DIR / "daily_ingestion_{time:YYYY-MM-DD}.log",
+    rotation="1 day", retention="30 days",
+    level="INFO",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
+)
+
 # ── Constants ─────────────────────────────────────────────────────────────
+ACCESS_TOKEN_FILE  = Path("config/.kite_access_token")
+INSTRUMENT_FILE    = Path("config/.kite_instruments.json")
+KITE_CHUNK_DAYS    = 1800      # Safe below Kite's 2000-day hard limit
+KITE_REQUEST_DELAY = 0.35      # Seconds between Kite API calls (rate limit ~3/sec)
+NSE_REQUEST_DELAY  = 1.5       # Seconds between NSE requests
+MAX_RETRIES        = 3
+
+# NSE URLs — used only for delivery % (not OHLCV)
+DELIVERY_URL  = "https://www.nseindia.com/archives/equities/mto/MT{date}.DAT"
+BHAVCOPY_URL  = "https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{date}.csv"
+
 NSE_HEADERS = {
-    # NSE blocks requests without a browser User-Agent
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://www.nseindia.com/",
+    "Accept"  : "*/*",
+    "Referer" : "https://www.nseindia.com/",
 }
-
-# NSE Bhavcopy URL pattern (new format as of 2024)
-BHAVCOPY_URL = (
-    "https://nsearchives.nseindia.com/content/cm/"
-    "BhavCopy_NSE_CM_0_0_0_{date}_F_0000.csv.zip"
-)
-
-# NSE Delivery (MTO) URL pattern
-DELIVERY_URL = (
-    "https://www.nseindia.com/archives/equities/mto/MT{date}.DAT"
-)
-
-# Retry settings for NSE (they rate-limit aggressively)
-MAX_RETRIES   = 5
-RETRY_DELAY   = 3    # seconds between retries
-REQUEST_TIMEOUT = 30  # seconds
-
-# ── Logger setup ──────────────────────────────────────────────────────────
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
-
-logger.add(
-    LOG_DIR / "nse_bhavcopy_{time:YYYY-MM-DD}.log",
-    rotation="1 day",
-    retention="30 days",
-    level="INFO",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}",
-)
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  CONFIG LOADER
+#  UNIVERSE LOADER
 # ══════════════════════════════════════════════════════════════════════════
 
 def load_universe() -> set:
-    """
-    Loads the Nifty 500 stock symbol list from config/universe.yaml.
-    Returns a set of NSE symbols (e.g. {'RELIANCE', 'TCS', 'INFY', ...})
-
-    If universe.yaml does not exist yet, falls back to downloading
-    the Nifty 500 list directly from NSE indices endpoint.
-    """
-    universe_path = Path("config/universe.yaml")
-
-    if universe_path.exists():
-        with open(universe_path, "r") as f:
-            data = yaml.safe_load(f)
-        symbols = set(data.get("nifty500", []))
-        logger.info(f"Universe loaded: {len(symbols)} symbols from config/universe.yaml")
-        return symbols
-
-    # Fallback: fetch Nifty 500 constituents from NSE
-    logger.warning("universe.yaml not found — fetching Nifty 500 from NSE...")
-    return _fetch_nifty500_from_nse()
-
-
-def _fetch_nifty500_from_nse() -> set:
-    """
-    Fetches the current Nifty 500 constituent list from NSE's index API.
-    Saves result to config/universe.yaml for future runs.
-    """
-    url = (
-        "https://nseindia.com/api/equity-stockIndices"
-        "?index=NIFTY%20500"
-    )
-    session = _get_nse_session()
-    try:
-        resp = session.get(url, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
-        symbols = {
-            item["symbol"]
-            for item in data.get("data", [])
-            if item.get("symbol") != "NIFTY 500"  # exclude index row
-        }
-        # Save to universe.yaml
-        Path("config").mkdir(exist_ok=True)
-        with open("config/universe.yaml", "w") as f:
-            yaml.dump({"nifty500": sorted(symbols)}, f)
-        logger.info(f"Fetched {len(symbols)} symbols from NSE; saved to universe.yaml")
-        return symbols
-    except Exception as e:
-        logger.error(f"Failed to fetch Nifty 500 from NSE: {e}")
-        raise
+    """Loads Nifty 500 symbols from config/universe.yaml"""
+    path = Path("config/universe.yaml")
+    if not path.exists():
+        raise FileNotFoundError("config/universe.yaml not found.")
+    with open(path, "r") as f:
+        data = yaml.safe_load(f)
+    if not data or not isinstance(data, dict):
+        raise ValueError("config/universe.yaml is empty or invalid.")
+    symbols = set(data.get("nifty500", []))
+    if not symbols:
+        raise ValueError("nifty500 key is empty in universe.yaml.")
+    logger.info(f"Universe loaded: {len(symbols)} symbols")
+    return symbols
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  DATABASE CONNECTION
+#  DATABASE
 # ══════════════════════════════════════════════════════════════════════════
 
 def get_db_connection():
-    """
-    Returns a psycopg2 connection to TimescaleDB.
-    Connection string loaded from TIMESCALE_URL in .env
-
-    Expected .env format:
-        TIMESCALE_URL=postgresql://user:password@localhost:5432/godseye
-    """
     url = os.getenv("TIMESCALE_URL")
     if not url:
-        raise EnvironmentError(
-            "TIMESCALE_URL not set in .env\n"
-            "Expected format: postgresql://user:password@localhost:5432/godseye"
-        )
+        raise EnvironmentError("TIMESCALE_URL not set in .env")
     conn = psycopg2.connect(url)
     conn.autocommit = False
     return conn
 
 
 def ensure_tables_exist(conn):
-    """
-    Creates the required TimescaleDB tables if they don't exist.
-
-    Tables created:
-        - daily_ohlcv     : Daily OHLCV + delivery data (hypertable on date)
-        - data_load_log   : Tracks which dates have been successfully loaded
-    """
+    """Creates all required TimescaleDB tables"""
     with conn.cursor() as cur:
 
-        # ── Main OHLCV table ──────────────────────────────────────────────
         cur.execute("""
             CREATE TABLE IF NOT EXISTS daily_ohlcv (
                 date            DATE        NOT NULL,
@@ -201,17 +124,15 @@ def ensure_tables_exist(conn):
                 low             NUMERIC(12,2),
                 close           NUMERIC(12,2),
                 prev_close      NUMERIC(12,2),
-                volume          BIGINT,
-                turnover        NUMERIC(18,2),    -- in Rupees
-                trades          INTEGER,
-                deliverable_qty BIGINT,
-                delivery_pct    NUMERIC(6,2),     -- delivery % of volume
+                volume          NUMERIC(22,0),
+                turnover        NUMERIC(22,2),
+                trades          NUMERIC(12,0),
+                deliverable_qty NUMERIC(22,0),
+                delivery_pct    NUMERIC(6,2),
                 PRIMARY KEY (date, symbol)
             );
         """)
 
-        # ── Convert to TimescaleDB hypertable (partitioned by date) ───────
-        # This gives us 10–100× faster time-range queries
         cur.execute("""
             SELECT create_hypertable(
                 'daily_ohlcv', 'date',
@@ -220,296 +141,423 @@ def ensure_tables_exist(conn):
             );
         """)
 
-        # ── Index for fast symbol lookups ─────────────────────────────────
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_daily_ohlcv_symbol
             ON daily_ohlcv (symbol, date DESC);
         """)
 
-        # ── Data load tracking table ──────────────────────────────────────
         cur.execute("""
             CREATE TABLE IF NOT EXISTS data_load_log (
-                date            DATE        PRIMARY KEY,
-                bhavcopy_rows   INTEGER,
-                delivery_rows   INTEGER,
-                merged_rows     INTEGER,
-                loaded_at       TIMESTAMP   DEFAULT NOW(),
-                status          VARCHAR(20) DEFAULT 'success'
+                date          DATE        PRIMARY KEY,
+                ohlcv_rows    INTEGER,
+                delivery_rows INTEGER,
+                merged_rows   INTEGER,
+                source        VARCHAR(20) DEFAULT 'kite',
+                loaded_at     TIMESTAMP   DEFAULT NOW(),
+                status        VARCHAR(20) DEFAULT 'success'
             );
         """)
 
     conn.commit()
-    logger.info("Database tables verified/created successfully.")
+    logger.info("Database tables verified/created")
+
+
+def is_already_loaded(trade_date: date, conn) -> bool:
+    """Returns True if date already successfully loaded"""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM data_load_log WHERE date = %s AND status = 'success'",
+            (trade_date,)
+        )
+        return cur.fetchone() is not None
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  NSE SESSION (handles cookies — NSE requires them)
+#  KITE CLIENT & INSTRUMENTS
 # ══════════════════════════════════════════════════════════════════════════
 
-def _get_nse_session() -> requests.Session:
+def get_kite_client() -> KiteConnect:
     """
-    Creates a requests Session that mimics a browser.
-    NSE requires visiting the homepage first to get session cookies,
-    otherwise data downloads return 403 Forbidden.
+    Returns authenticated KiteConnect client using cached access token.
+    Run kite_feed.py --mode auth to refresh token if expired.
     """
-    session = requests.Session()
-    session.headers.update(NSE_HEADERS)
+    api_key = os.getenv("KITE_API_KEY")
+    if not api_key:
+        raise EnvironmentError("KITE_API_KEY not set in .env")
 
-    try:
-        # Hit NSE homepage to get session cookies
-        session.get("https://www.nseindia.com", timeout=REQUEST_TIMEOUT)
-        time.sleep(1)  # Polite delay
-    except Exception as e:
-        logger.warning(f"Could not initialize NSE session cookies: {e}")
+    kite = KiteConnect(api_key=api_key)
 
-    return session
+    if not ACCESS_TOKEN_FILE.exists():
+        raise FileNotFoundError(
+            "Kite access token not found.\n"
+            "Run: python -m data.ingestion.kite_feed --mode auth"
+        )
+
+    token_data = json.loads(ACCESS_TOKEN_FILE.read_text())
+    token_date = token_data.get("date", "")
+
+    if token_date != str(date.today()):
+        raise ValueError(
+            f"Kite access token expired (date: {token_date}).\n"
+            "Run: python -m data.ingestion.kite_feed --mode auth"
+        )
+
+    kite.set_access_token(token_data["access_token"])
+    logger.info("Kite client authenticated successfully")
+    return kite
+
+
+def load_instrument_tokens(kite: KiteConnect, universe: set) -> dict:
+    """
+    Returns {symbol: instrument_token} for all universe symbols.
+    Instrument token is the numeric ID required by Kite historical API.
+    Result is cached daily to avoid repeated API calls.
+    """
+    # Use cache if available and fresh
+    if INSTRUMENT_FILE.exists():
+        cache = json.loads(INSTRUMENT_FILE.read_text())
+        if cache.get("date") == str(date.today()):
+            token_map = {v: int(k) for k, v in cache["tokens"].items()}
+            logger.info(f"Loaded {len(token_map)} instrument tokens from cache")
+            return token_map
+
+    logger.info("Fetching instrument list from Kite...")
+    instruments = kite.instruments("NSE")
+
+    token_map = {}
+    for inst in instruments:
+        symbol = inst["tradingsymbol"]
+        if (
+            symbol in universe
+            and inst["segment"] == "NSE"
+            and inst["instrument_type"] == "EQ"
+        ):
+            token_map[symbol] = inst["instrument_token"]
+
+    # Save cache
+    INSTRUMENT_FILE.parent.mkdir(exist_ok=True)
+    INSTRUMENT_FILE.write_text(json.dumps({
+        "date"  : str(date.today()),
+        "tokens": {str(v): k for k, v in token_map.items()}
+    }, indent=2))
+
+    logger.info(f"Instrument tokens loaded: {len(token_map)} symbols")
+    return token_map
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  BHAVCOPY DOWNLOAD & PARSE
+#  KITE OHLCV FETCHER — WITH CHUNKING
 # ══════════════════════════════════════════════════════════════════════════
 
-def download_bhavcopy(trade_date: date, session: requests.Session) -> pd.DataFrame:
+def fetch_ohlcv_from_kite(
+    kite: KiteConnect,
+    token_map: dict,
+    start_date: date,
+    end_date: date,
+) -> pd.DataFrame:
     """
-    Downloads and parses the NSE Bhavcopy CSV for a given trading date.
+    Fetches daily OHLCV for all universe symbols from Kite.
+
+    IMPORTANT: Kite has a hard limit of 2000 days per API call.
+    This function automatically splits requests into KITE_CHUNK_DAYS
+    (1800 day) chunks to stay safely below the limit.
+
+    For a 5-year backfill (2019-2026 = ~1850 trading days):
+        Chunk 1: 2019-01-01 → 2023-12-14 (1800 days)
+        Chunk 2: 2023-12-15 → today      (~490 days)
 
     Args:
-        trade_date : The trading date to download (e.g. date(2024, 3, 15))
-        session    : Authenticated requests.Session with NSE cookies
+        kite       : Authenticated KiteConnect client
+        token_map  : {symbol: instrument_token}
+        start_date : Start of full date range
+        end_date   : End of full date range
 
     Returns:
-        DataFrame with columns:
-            symbol, series, open, high, low, close, prev_close,
-            volume, turnover, trades, date
-
-    Raises:
-        ValueError  : If date is a weekend/holiday (no data available)
-        RuntimeError: If download fails after all retries
+        DataFrame with columns: date, symbol, series, open, high, low, close, volume
     """
-    # NSE uses DDMMYYYY format in Bhavcopy URL
-    date_str = trade_date.strftime("%d%m%Y")
-    url = BHAVCOPY_URL.format(date=date_str)
+    all_records = []
+    total       = len(token_map)
 
-    logger.info(f"Downloading Bhavcopy for {trade_date} from NSE...")
+    logger.info(
+        f"Fetching OHLCV from Kite: {total} symbols | "
+        f"{start_date} to {end_date} | "
+        f"chunk size: {KITE_CHUNK_DAYS} days"
+    )
 
-    raw_bytes = _download_with_retry(url, session)
-    if raw_bytes is None:
-        raise RuntimeError(f"Bhavcopy download failed for {trade_date} after {MAX_RETRIES} retries")
+    for i, (symbol, token) in enumerate(token_map.items(), 1):
+        symbol_candles = []
 
-    # ── Unzip and parse CSV ───────────────────────────────────────────────
-    try:
-        with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
-            csv_filename = zf.namelist()[0]
-            with zf.open(csv_filename) as f:
-                df = pd.read_csv(f)
-    except zipfile.BadZipFile:
-        raise RuntimeError(f"Bhavcopy for {trade_date} is not a valid ZIP file")
-
-    # ── Normalize column names ────────────────────────────────────────────
-    df.columns = df.columns.str.strip().str.upper()
-
-    # Map NSE's column names to our standard names
-    # (NSE occasionally changes column names — this mapping handles variants)
-    column_map = {
-        "SYMBOL"       : "symbol",
-        "SERIES"       : "series",
-        "OPEN"         : "open",
-        "OPEN PRICE"   : "open",
-        "HIGH"         : "high",
-        "HIGH PRICE"   : "high",
-        "LOW"          : "low",
-        "LOW PRICE"    : "low",
-        "CLOSE"        : "close",
-        "CLOSE PRICE"  : "close",
-        "LAST"         : "close",     # fallback if CLOSE missing
-        "PREVCLOSE"    : "prev_close",
-        "PREV. CLOSE"  : "prev_close",
-        "TOTTRDQTY"    : "volume",
-        "TOTAL TRADED QUANTITY": "volume",
-        "TOTTRDVAL"    : "turnover",
-        "TOTAL TRADED VALUE"  : "turnover",
-        "TOTALTRADES"  : "trades",
-        "NO OF TRADES" : "trades",
-    }
-
-    df = df.rename(columns={k: v for k, v in column_map.items() if k in df.columns})
-
-    # ── Keep only EQ series (exclude BE, BL, BT, etc.) ───────────────────
-    if "series" in df.columns:
-        df = df[df["series"] == "EQ"].copy()
-
-    # ── Add date column ───────────────────────────────────────────────────
-    df["date"] = trade_date
-
-    # ── Select and clean final columns ────────────────────────────────────
-    keep = ["symbol", "series", "open", "high", "low", "close",
-            "prev_close", "volume", "turnover", "trades", "date"]
-    available = [c for c in keep if c in df.columns]
-    df = df[available].copy()
-
-    # Strip whitespace from symbol names
-    df["symbol"] = df["symbol"].str.strip().str.upper()
-
-    # Convert numeric columns (handle any comma-formatted numbers)
-    numeric_cols = ["open", "high", "low", "close", "prev_close",
-                    "volume", "turnover", "trades"]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(
-                df[col].astype(str).str.replace(",", ""), errors="coerce"
+        # ── Split into chunks to respect 2000-day limit ───────────────────
+        chunk_start = start_date
+        while chunk_start <= end_date:
+            chunk_end = min(
+                chunk_start + timedelta(days=KITE_CHUNK_DAYS),
+                end_date
             )
 
-    logger.info(f"Bhavcopy parsed: {len(df)} EQ series records for {trade_date}")
+            try:
+                candles = kite.historical_data(
+                    instrument_token = token,
+                    from_date        = chunk_start,
+                    to_date          = chunk_end,
+                    interval         = "day",
+                    continuous       = False,
+                    oi               = False,
+                )
+                symbol_candles.extend(candles or [])
+
+            except Exception as chunk_err:
+                logger.warning(
+                    f"{symbol} chunk {chunk_start}→{chunk_end} failed: {chunk_err}"
+                )
+
+            # Move to next chunk
+            chunk_start = chunk_end + timedelta(days=1)
+
+            # Rate limit between chunk calls
+            time.sleep(KITE_REQUEST_DELAY)
+
+        # ── Process all candles for this symbol ───────────────────────────
+        if not symbol_candles:
+            logger.debug(f"{symbol}: No candles returned")
+            continue
+
+        for candle in symbol_candles:
+            candle_date = candle["date"]
+            if hasattr(candle_date, "date"):
+                candle_date = candle_date.date()
+
+            all_records.append({
+                "date"  : candle_date,
+                "symbol": symbol,
+                "series": "EQ",
+                "open"  : candle["open"],
+                "high"  : candle["high"],
+                "low"   : candle["low"],
+                "close" : candle["close"],
+                "volume": candle["volume"],
+            })
+
+        # Progress log every 50 symbols
+        if i % 50 == 0:
+            logger.info(
+                f"Kite OHLCV progress: {i}/{total} symbols | "
+                f"{len(all_records):,} records so far"
+            )
+
+    # ── Build DataFrame ───────────────────────────────────────────────────
+    if not all_records:
+        logger.error("No OHLCV data returned from Kite")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_records)
+    df["date"] = pd.to_datetime(df["date"]).dt.date
+
+    logger.success(
+        f"Kite OHLCV fetch complete: "
+        f"{len(df):,} records | "
+        f"{df['symbol'].nunique()} symbols | "
+        f"{df['date'].nunique()} dates"
+    )
     return df
 
 
-def download_delivery_data(trade_date: date, session: requests.Session) -> pd.DataFrame:
-    """
-    Downloads and parses NSE Delivery (MTO) data for a given trading date.
-    Delivery % is a core component of Pillar 2 (MSI) feature engineering.
+# ══════════════════════════════════════════════════════════════════════════
+#  NSE DELIVERY FETCHER
+# ══════════════════════════════════════════════════════════════════════════
 
-    Args:
-        trade_date : The trading date
-        session    : NSE session
+def get_nse_session() -> requests.Session:
+    """Creates NSE session with required cookies"""
+    session = requests.Session()
+    session.headers.update(NSE_HEADERS)
+    try:
+        session.get("https://www.nseindia.com", timeout=15)
+        time.sleep(1.5)
+    except Exception as e:
+        logger.warning(f"NSE session init: {e}")
+    return session
 
-    Returns:
-        DataFrame with columns: symbol, deliverable_qty, delivery_pct
-        Returns empty DataFrame if delivery data unavailable (e.g. holidays)
+
+def fetch_delivery_from_nse(
+    trade_date: date,
+    session: requests.Session,
+) -> pd.DataFrame:
     """
-    # MTO file uses DDMMYYYY format
+    Fetches delivery % from NSE for a single trading date.
+    This is the ONLY thing we need from NSE — Kite handles all OHLCV.
+
+    Tries MTO DAT file first, falls back to Bhavcopy CSV.
+    Returns empty DataFrame if neither works — delivery will be NULL in DB.
+    NULL delivery is handled gracefully by the MSI feature calculator.
+    """
     date_str = trade_date.strftime("%d%m%Y")
-    url = DELIVERY_URL.format(date=date_str)
 
-    logger.info(f"Downloading Delivery data for {trade_date}...")
+    # ── Primary: MTO delivery file ────────────────────────────────────────
+    mto_url = DELIVERY_URL.format(date=date_str)
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = session.get(mto_url, timeout=15)
+            if resp.status_code == 200:
+                df = _parse_mto_file(resp.content)
+                if not df.empty:
+                    return df
+            elif resp.status_code == 404:
+                break
+            time.sleep(NSE_REQUEST_DELAY * attempt)
+        except Exception as e:
+            logger.debug(f"MTO attempt {attempt} for {trade_date}: {e}")
+            time.sleep(NSE_REQUEST_DELAY * attempt)
 
-    raw_bytes = _download_with_retry(url, session)
-    if raw_bytes is None:
-        logger.warning(f"Delivery data not available for {trade_date} — will proceed without it")
-        return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct"])
+    # ── Fallback: Bhavcopy CSV for delivery ───────────────────────────────
+    bhav_url = BHAVCOPY_URL.format(date=date_str)
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            resp = session.get(bhav_url, timeout=15)
+            if resp.status_code == 200:
+                df = _parse_bhavcopy_for_delivery(resp.content)
+                if not df.empty:
+                    return df
+            elif resp.status_code == 404:
+                break
+            time.sleep(NSE_REQUEST_DELAY * attempt)
+        except Exception as e:
+            logger.debug(f"Bhavcopy fallback attempt {attempt} for {trade_date}: {e}")
+            time.sleep(NSE_REQUEST_DELAY * attempt)
 
-    # ── Parse the fixed-format DAT file ──────────────────────────────────
-    # MTO.DAT is a pipe-separated or fixed-width file depending on NSE version
+    logger.warning(f"Delivery data unavailable for {trade_date} — will store NULL")
+    return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct", "trades"])
+
+
+def _parse_mto_file(raw_bytes: bytes) -> pd.DataFrame:
+    """Parses NSE MTO DAT file for delivery data"""
     try:
         content = raw_bytes.decode("utf-8", errors="ignore")
-        lines = content.strip().split("\n")
-
+        lines   = content.strip().split("\n")
         records = []
+
         for line in lines:
             parts = [p.strip() for p in line.split(",")]
-            # Expected format: record_type, sr_no, symbol, series, traded_qty,
-            #                  deliverable_qty, delivery_pct
-            if len(parts) >= 7 and parts[0] == "90":  # '90' = equity delivery record
+            if len(parts) >= 7 and parts[0] == "90":
                 try:
                     records.append({
                         "symbol"         : parts[2].strip().upper(),
                         "series"         : parts[3].strip(),
                         "deliverable_qty": int(float(parts[5].replace(",", ""))),
                         "delivery_pct"   : float(parts[6].replace(",", "")),
+                        "trades"         : None,
                     })
                 except (ValueError, IndexError):
                     continue
 
         if not records:
-            logger.warning(f"No delivery records parsed for {trade_date}")
-            return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct"])
+            return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct", "trades"])
 
         df = pd.DataFrame(records)
-
-        # Keep only EQ series
-        df = df[df["series"] == "EQ"][["symbol", "deliverable_qty", "delivery_pct"]].copy()
-
-        logger.info(f"Delivery data parsed: {len(df)} records for {trade_date}")
+        df = df[df["series"] == "EQ"][
+            ["symbol", "deliverable_qty", "delivery_pct", "trades"]
+        ].copy()
         return df
 
     except Exception as e:
-        logger.error(f"Failed to parse delivery data for {trade_date}: {e}")
-        return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct"])
+        logger.error(f"MTO parse error: {e}")
+        return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct", "trades"])
 
 
-# ══════════════════════════════════════════════════════════════════════════
-#  MERGE, FILTER & VALIDATE
-# ══════════════════════════════════════════════════════════════════════════
-
-def merge_and_filter(
-    bhavcopy_df: pd.DataFrame,
-    delivery_df: pd.DataFrame,
-    universe: set,
-    trade_date: date,
-) -> pd.DataFrame:
+def _parse_bhavcopy_for_delivery(raw_bytes: bytes) -> pd.DataFrame:
     """
-    Merges Bhavcopy and Delivery DataFrames, filters to universe stocks,
-    and validates data quality.
-
-    Args:
-        bhavcopy_df : Raw Bhavcopy DataFrame
-        delivery_df : Raw Delivery DataFrame (may be empty)
-        universe    : Set of valid NSE symbols (Nifty 500)
-        trade_date  : The trading date
-
-    Returns:
-        Clean, merged DataFrame ready for database insertion
+    Parses Bhavcopy CSV extracting ONLY delivery % and trades.
+    OHLCV columns from here are ignored — Kite is authoritative for those.
     """
-    # ── Filter to universe stocks only ────────────────────────────────────
-    pre_filter = len(bhavcopy_df)
-    bhavcopy_df = bhavcopy_df[bhavcopy_df["symbol"].isin(universe)].copy()
-    logger.info(
-        f"Universe filter: {pre_filter} → {len(bhavcopy_df)} records "
-        f"({pre_filter - len(bhavcopy_df)} non-universe stocks removed)"
-    )
+    try:
+        content = raw_bytes.decode("utf-8", errors="ignore")
+        df      = pd.read_csv(io.StringIO(content))
+        df.columns = df.columns.str.strip().str.upper()
 
-    # ── Left join delivery data ───────────────────────────────────────────
-    if not delivery_df.empty:
-        df = bhavcopy_df.merge(delivery_df, on="symbol", how="left")
-    else:
-        df = bhavcopy_df.copy()
+        column_map = {
+            "SYMBOL"      : "symbol",
+            "SERIES"      : "series",
+            "TOTALTRADES" : "trades",
+            "NOOFTRADES"  : "trades",
+            "NO OF TRADES": "trades",
+        }
+        df = df.rename(columns={k: v for k, v in column_map.items() if k in df.columns})
+
+        if "series" in df.columns:
+            df = df[df["series"].str.strip() == "EQ"]
+        if "symbol" in df.columns:
+            df["symbol"] = df["symbol"].str.strip().str.upper()
+
+        if "trades" in df.columns:
+            df["trades"] = pd.to_numeric(df["trades"], errors="coerce")
+        else:
+            df["trades"] = None
+
         df["deliverable_qty"] = None
         df["delivery_pct"]    = None
 
-    # ── Data quality validation ───────────────────────────────────────────
-    issues = []
+        return df[["symbol", "deliverable_qty", "delivery_pct", "trades"]].copy()
 
-    # 1. Remove rows where close price is zero or negative
-    bad_price = df["close"] <= 0
-    if bad_price.sum() > 0:
-        issues.append(f"{bad_price.sum()} rows with close ≤ 0 removed")
-        df = df[~bad_price]
+    except Exception as e:
+        logger.error(f"Bhavcopy delivery parse error: {e}")
+        return pd.DataFrame(columns=["symbol", "deliverable_qty", "delivery_pct", "trades"])
 
-    # 2. Remove rows where volume is zero (non-traded stocks)
-    if "volume" in df.columns:
-        bad_vol = df["volume"] == 0
-        if bad_vol.sum() > 0:
-            issues.append(f"{bad_vol.sum()} zero-volume rows removed")
-            df = df[~bad_vol]
 
-    # 3. Check OHLC consistency (high >= low, high >= open, high >= close)
-    ohlc_inconsistent = (
-        (df["high"] < df["low"]) |
-        (df["high"] < df["open"]) |
-        (df["high"] < df["close"]) |
-        (df["low"] > df["open"]) |
-        (df["low"] > df["close"])
-    )
-    if ohlc_inconsistent.sum() > 0:
-        issues.append(f"{ohlc_inconsistent.sum()} OHLC-inconsistent rows removed")
-        df = df[~ohlc_inconsistent]
+# ══════════════════════════════════════════════════════════════════════════
+#  MERGE & VALIDATE
+# ══════════════════════════════════════════════════════════════════════════
 
-    # 4. Flag extreme price changes (> 50% from prev_close in one day)
-    # These are likely circuit breaker events — flag but don't remove
-    if "prev_close" in df.columns and df["prev_close"].notna().any():
-        extreme_move = (
-            (df["close"] / df["prev_close"] - 1).abs() > 0.50
-        ) & df["prev_close"].notna()
-        if extreme_move.sum() > 0:
-            logger.warning(
-                f"{extreme_move.sum()} stocks with >50% daily move "
-                f"(possible circuit breaker): "
-                f"{df[extreme_move]['symbol'].tolist()}"
-            )
+def merge_and_validate(
+    ohlcv_df: pd.DataFrame,
+    delivery_df: pd.DataFrame,
+    trade_date: date,
+) -> pd.DataFrame:
+    """
+    Merges Kite OHLCV with NSE delivery data for a single trading date.
+    Kite OHLCV is authoritative. NSE delivery augments it.
+    """
+    # Filter ohlcv_df to this specific date
+    df = ohlcv_df[ohlcv_df["date"] == trade_date].copy()
 
-    if issues:
-        logger.warning(f"Data quality issues for {trade_date}: {'; '.join(issues)}")
+    if df.empty:
+        return df
 
-    # ── Final column selection & types ────────────────────────────────────
+    # Merge delivery
+    if not delivery_df.empty:
+        df = df.merge(delivery_df, on="symbol", how="left")
+    else:
+        df["deliverable_qty"] = None
+        df["delivery_pct"]    = None
+        df["trades"]          = None
+
+    # Add missing columns
+    if "prev_close" not in df.columns:
+        df["prev_close"] = None
+
+    # Estimate turnover (Kite doesn't provide it)
+    if "turnover" not in df.columns:
+        df["turnover"] = (
+            df["volume"] * ((df["open"] + df["close"]) / 2)
+        ).round(2)
+
+    # Quality checks
+    df = df[df["close"]  > 0]
+    df = df[df["volume"] > 0]
+
+    # OHLC consistency
+    if len(df) > 0:
+        valid = (
+            (df["high"] >= df["low"])   &
+            (df["high"] >= df["open"])  &
+            (df["high"] >= df["close"]) &
+            (df["low"]  <= df["open"])  &
+            (df["low"]  <= df["close"])
+        )
+        removed = (~valid).sum()
+        if removed > 0:
+            logger.warning(f"{removed} OHLC inconsistencies removed for {trade_date}")
+        df = df[valid]
+
+    # Final column selection
     final_cols = [
         "date", "symbol", "series", "open", "high", "low", "close",
         "prev_close", "volume", "turnover", "trades",
@@ -520,11 +568,9 @@ def merge_and_filter(
             df[col] = None
 
     df = df[final_cols].copy()
-
-    # Ensure date column is correct type
     df["date"] = pd.to_datetime(df["date"]).dt.date
 
-    logger.info(f"Final merged dataset: {len(df)} clean records for {trade_date}")
+    logger.info(f"{trade_date}: {len(df)} clean records")
     return df
 
 
@@ -533,20 +579,8 @@ def merge_and_filter(
 # ══════════════════════════════════════════════════════════════════════════
 
 def insert_to_db(df: pd.DataFrame, conn, trade_date: date) -> int:
-    """
-    Inserts the clean DataFrame into TimescaleDB using fast batch upsert.
-    Uses ON CONFLICT DO UPDATE so re-running for the same date is safe.
-
-    Args:
-        df         : Clean merged DataFrame
-        conn       : psycopg2 connection
-        trade_date : Trading date (for logging)
-
-    Returns:
-        Number of rows inserted/updated
-    """
+    """Batch upserts clean DataFrame to TimescaleDB"""
     if df.empty:
-        logger.warning(f"No data to insert for {trade_date}")
         return 0
 
     records = df.to_dict("records")
@@ -557,16 +591,15 @@ def insert_to_db(df: pd.DataFrame, conn, trade_date: date) -> int:
             prev_close, volume, turnover, trades,
             deliverable_qty, delivery_pct
         ) VALUES (
-            %(date)s, %(symbol)s, %(series)s, %(open)s, %(high)s, %(low)s, %(close)s,
-            %(prev_close)s, %(volume)s, %(turnover)s, %(trades)s,
-            %(deliverable_qty)s, %(delivery_pct)s
+            %(date)s, %(symbol)s, %(series)s, %(open)s, %(high)s,
+            %(low)s, %(close)s, %(prev_close)s, %(volume)s,
+            %(turnover)s, %(trades)s, %(deliverable_qty)s, %(delivery_pct)s
         )
         ON CONFLICT (date, symbol) DO UPDATE SET
             open            = EXCLUDED.open,
             high            = EXCLUDED.high,
             low             = EXCLUDED.low,
             close           = EXCLUDED.close,
-            prev_close      = EXCLUDED.prev_close,
             volume          = EXCLUDED.volume,
             turnover        = EXCLUDED.turnover,
             trades          = EXCLUDED.trades,
@@ -575,8 +608,9 @@ def insert_to_db(df: pd.DataFrame, conn, trade_date: date) -> int:
     """
 
     log_sql = """
-        INSERT INTO data_load_log (date, bhavcopy_rows, delivery_rows, merged_rows, status)
-        VALUES (%s, %s, %s, %s, 'success')
+        INSERT INTO data_load_log
+            (date, ohlcv_rows, delivery_rows, merged_rows, source, status)
+        VALUES (%s, %s, %s, %s, 'kite', 'success')
         ON CONFLICT (date) DO UPDATE SET
             merged_rows = EXCLUDED.merged_rows,
             loaded_at   = NOW(),
@@ -585,278 +619,235 @@ def insert_to_db(df: pd.DataFrame, conn, trade_date: date) -> int:
 
     try:
         with conn.cursor() as cur:
-            # Batch insert (much faster than row-by-row)
             psycopg2.extras.execute_batch(cur, insert_sql, records, page_size=500)
-
-            # Log the successful load
-            delivery_rows = df["deliverable_qty"].notna().sum()
-            cur.execute(log_sql, (trade_date, len(df), int(delivery_rows), len(df)))
-
+            delivery_rows = int(df["deliverable_qty"].notna().sum())
+            cur.execute(log_sql, (trade_date, len(df), delivery_rows, len(df)))
         conn.commit()
-        logger.info(f"Successfully inserted {len(df)} rows for {trade_date}")
+        logger.success(f"✓ {trade_date} — {len(df)} rows inserted")
         return len(df)
-
     except Exception as e:
         conn.rollback()
-        logger.error(f"Database insertion failed for {trade_date}: {e}")
+        logger.error(f"DB insert failed for {trade_date}: {e}")
         raise
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  HELPER UTILITIES
+#  PREV_CLOSE UPDATER
 # ══════════════════════════════════════════════════════════════════════════
 
-def _download_with_retry(url: str, session: requests.Session) -> bytes | None:
+def update_prev_close(conn):
     """
-    Downloads a URL with exponential backoff retry.
-    Returns raw bytes on success, None on all retries exhausted.
+    Updates prev_close for all rows using previous trading day's close.
+    Run once after backfill completes — much faster than computing per-row.
     """
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            resp = session.get(url, timeout=REQUEST_TIMEOUT)
-            if resp.status_code == 200:
-                return resp.content
-            elif resp.status_code == 404:
-                logger.warning(f"404 Not Found: {url} (likely holiday/weekend)")
-                return None
-            else:
-                logger.warning(
-                    f"Attempt {attempt}/{MAX_RETRIES}: HTTP {resp.status_code} for {url}"
-                )
-        except requests.RequestException as e:
-            logger.warning(f"Attempt {attempt}/{MAX_RETRIES}: Request error: {e}")
-
-        if attempt < MAX_RETRIES:
-            sleep_time = RETRY_DELAY * attempt  # exponential backoff
-            logger.info(f"Retrying in {sleep_time}s...")
-            time.sleep(sleep_time)
-
-    return None
-
-
-def is_already_loaded(trade_date: date, conn) -> bool:
-    """
-    Checks if a given date is already in data_load_log with status='success'.
-    Prevents duplicate downloads during backfill.
+    logger.info("Updating prev_close values (one-time SQL pass)...")
+    sql = """
+        UPDATE daily_ohlcv d
+        SET prev_close = prev.prev_close
+        FROM (
+            SELECT
+                date,
+                symbol,
+                LAG(close) OVER (PARTITION BY symbol ORDER BY date) AS prev_close
+            FROM daily_ohlcv
+        ) prev
+        WHERE d.date   = prev.date
+          AND d.symbol = prev.symbol
+          AND prev.prev_close IS NOT NULL;
     """
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM data_load_log WHERE date = %s AND status = 'success'",
-            (trade_date,)
-        )
-        return cur.fetchone() is not None
+        cur.execute(sql)
+    conn.commit()
+    logger.success("prev_close updated for all rows")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  HELPERS
+# ══════════════════════════════════════════════════════════════════════════
 
 def get_trading_dates(start: date, end: date) -> list[date]:
-    """
-    Returns a list of weekdays between start and end (inclusive).
-    Note: This includes some public holidays — NSE will return 404 for those,
-    which is handled gracefully in the download functions.
-    """
-    dates = []
+    """Returns all weekdays between start and end inclusive"""
+    dates   = []
     current = start
     while current <= end:
-        if current.weekday() < 5:  # Monday=0, Friday=4
+        if current.weekday() < 5:
             dates.append(current)
         current += timedelta(days=1)
     return dates
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  MAIN PIPELINE ORCHESTRATOR
+#  PIPELINE MODES
 # ══════════════════════════════════════════════════════════════════════════
-
-def run_for_date(trade_date: date, session: requests.Session,
-                 universe: set, conn) -> bool:
-    """
-    Runs the complete download → parse → merge → validate → insert
-    pipeline for a single trading date.
-
-    Args:
-        trade_date : Date to process
-        session    : NSE session
-        universe   : Nifty 500 symbol set
-        conn       : DB connection
-
-    Returns:
-        True if successful, False if skipped (holiday/already loaded)
-    """
-    # Skip if already loaded
-    if is_already_loaded(trade_date, conn):
-        logger.info(f"Skipping {trade_date} — already loaded in DB")
-        return False
-
-    # Skip weekends
-    if trade_date.weekday() >= 5:
-        logger.debug(f"Skipping {trade_date} — weekend")
-        return False
-
-    try:
-        # Step 1: Download Bhavcopy
-        bhavcopy_df = download_bhavcopy(trade_date, session)
-
-        # Step 2: Download Delivery data
-        delivery_df = download_delivery_data(trade_date, session)
-
-        # Step 3: Merge, filter to universe, validate
-        clean_df = merge_and_filter(bhavcopy_df, delivery_df, universe, trade_date)
-
-        # Step 4: Insert to TimescaleDB
-        rows_inserted = insert_to_db(clean_df, conn, trade_date)
-
-        logger.success(f"✓ {trade_date} complete — {rows_inserted} rows inserted")
-
-        # Polite delay to avoid hammering NSE
-        time.sleep(1.5)
-        return True
-
-    except RuntimeError as e:
-        # 404s (holidays) are expected — just skip
-        logger.info(f"Skipping {trade_date}: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"Failed to process {trade_date}: {e}")
-        return False
-
-
-def run_daily():
-    """
-    Daily mode: downloads yesterday's data (or today's if after 6 PM IST).
-    Run this via Airflow DAG nightly at 10:30 PM IST.
-    """
-    # Determine which date to download
-    now = datetime.now()
-    # If before 6 PM, use previous trading day
-    if now.hour < 18:
-        target_date = (now - timedelta(days=1)).date()
-    else:
-        target_date = now.date()
-
-    # Roll back to Friday if it's a weekend
-    while target_date.weekday() >= 5:
-        target_date -= timedelta(days=1)
-
-    logger.info(f"Daily mode: processing {target_date}")
-
-    universe = load_universe()
-    session  = _get_nse_session()
-    conn     = get_db_connection()
-
-    try:
-        ensure_tables_exist(conn)
-        run_for_date(target_date, session, universe, conn)
-    finally:
-        conn.close()
-
 
 def run_backfill(start_date: date):
     """
-    Backfill mode: loads all trading days from start_date to yesterday.
-    Run once during Phase 0 setup to load 5 years of history.
+    Full historical backfill.
 
-    Expected runtime: ~45–90 minutes for 5 years (1250 trading days)
+    Step 1: Fetch ALL OHLCV from Kite in 1800-day chunks per symbol
+    Step 2: For each trading date, fetch delivery from NSE, merge, insert
+    Step 3: Update prev_close in a single SQL pass
     """
     end_date     = date.today() - timedelta(days=1)
     trading_days = get_trading_dates(start_date, end_date)
 
     logger.info(
-        f"Backfill mode: {len(trading_days)} dates from "
+        f"Backfill: {len(trading_days)} trading days | "
         f"{start_date} to {end_date}"
     )
 
     universe = load_universe()
-    session  = _get_nse_session()
+    kite     = get_kite_client()
     conn     = get_db_connection()
+    nse_sess = get_nse_session()
 
+    ensure_tables_exist(conn)
+
+    # ── Step 1: Fetch all OHLCV from Kite upfront ─────────────────────────
+    logger.info("Step 1/3: Fetching OHLCV from Kite (chunked)...")
+    token_map = load_instrument_tokens(kite, universe)
+    ohlcv_df  = fetch_ohlcv_from_kite(kite, token_map, start_date, end_date)
+
+    if ohlcv_df.empty:
+        logger.error("No OHLCV data from Kite — check access token and retry")
+        conn.close()
+        return
+
+    # ── Step 2: Process each date ─────────────────────────────────────────
+    logger.info("Step 2/3: Merging with NSE delivery data and inserting...")
     loaded  = 0
     skipped = 0
-    failed  = 0
 
-    try:
-        ensure_tables_exist(conn)
+    for i, trade_date in enumerate(trading_days, 1):
+        logger.info(f"Progress: {i}/{len(trading_days)} — {trade_date}")
 
-        for i, trade_date in enumerate(trading_days, 1):
-            logger.info(f"Progress: {i}/{len(trading_days)} — {trade_date}")
+        if is_already_loaded(trade_date, conn):
+            logger.info(f"Skipping {trade_date} — already loaded")
+            skipped += 1
+            continue
 
-            success = run_for_date(trade_date, session, universe, conn)
+        # Fetch delivery from NSE (lightweight — only delivery %)
+        delivery_df = fetch_delivery_from_nse(trade_date, nse_sess)
 
-            if success:
-                loaded += 1
-            else:
-                skipped += 1
+        # Merge and validate
+        clean_df = merge_and_validate(ohlcv_df, delivery_df, trade_date)
 
-            # Refresh NSE session every 100 dates (cookies expire)
-            if i % 100 == 0:
-                logger.info("Refreshing NSE session...")
-                session = _get_nse_session()
+        if clean_df.empty:
+            logger.info(f"Skipping {trade_date} — no data (likely holiday)")
+            skipped += 1
+            continue
 
-    except KeyboardInterrupt:
-        logger.warning("Backfill interrupted by user — progress saved to DB")
-    finally:
-        conn.close()
+        # Insert to TimescaleDB
+        try:
+            insert_to_db(clean_df, conn, trade_date)
+            loaded += 1
+        except Exception as e:
+            logger.error(f"Insert failed for {trade_date}: {e}")
 
-    logger.info(
+        # Refresh NSE session every 100 dates
+        if i % 100 == 0:
+            nse_sess = get_nse_session()
+
+        time.sleep(0.1)
+
+    # ── Step 3: Update prev_close ─────────────────────────────────────────
+    logger.info("Step 3/3: Updating prev_close...")
+    update_prev_close(conn)
+    conn.close()
+
+    logger.success(
         f"Backfill complete — "
-        f"Loaded: {loaded} | Skipped: {skipped} | Failed: {failed}"
+        f"Loaded: {loaded} dates | Skipped: {skipped} dates | "
+        f"Approx rows: ~{loaded * 450:,}"
     )
 
 
-def run_single(target_date: date):
-    """
-    Single date mode: downloads data for one specific date.
-    Useful for gap-filling or testing.
-    """
-    logger.info(f"Single date mode: {target_date}")
+def run_daily():
+    """Daily update — fetches yesterday's data via Kite + NSE delivery"""
+    now = datetime.now()
+    target_date = (now - timedelta(days=1)).date() if now.hour < 18 else now.date()
+    while target_date.weekday() >= 5:
+        target_date -= timedelta(days=1)
+
+    logger.info(f"Daily mode: {target_date}")
 
     universe = load_universe()
-    session  = _get_nse_session()
+    kite     = get_kite_client()
     conn     = get_db_connection()
+    nse_sess = get_nse_session()
 
-    try:
-        ensure_tables_exist(conn)
-        run_for_date(target_date, session, universe, conn)
-    finally:
+    ensure_tables_exist(conn)
+
+    if is_already_loaded(target_date, conn):
+        logger.info(f"{target_date} already loaded")
         conn.close()
+        return
+
+    token_map   = load_instrument_tokens(kite, universe)
+    ohlcv_df    = fetch_ohlcv_from_kite(kite, token_map, target_date, target_date)
+    delivery_df = fetch_delivery_from_nse(target_date, nse_sess)
+    clean_df    = merge_and_validate(ohlcv_df, delivery_df, target_date)
+
+    insert_to_db(clean_df, conn, target_date)
+    update_prev_close(conn)
+    conn.close()
+
+    logger.success(f"Daily update complete: {target_date}")
+
+
+def run_single(target_date: date):
+    """Single date — for testing or gap fill"""
+    logger.info(f"Single mode: {target_date}")
+
+    universe = load_universe()
+    kite     = get_kite_client()
+    conn     = get_db_connection()
+    nse_sess = get_nse_session()
+
+    ensure_tables_exist(conn)
+
+    token_map   = load_instrument_tokens(kite, universe)
+    ohlcv_df    = fetch_ohlcv_from_kite(kite, token_map, target_date, target_date)
+    delivery_df = fetch_delivery_from_nse(target_date, nse_sess)
+    clean_df    = merge_and_validate(ohlcv_df, delivery_df, target_date)
+
+    insert_to_db(clean_df, conn, target_date)
+    conn.close()
+
+    logger.success(f"Single date complete: {target_date} — {len(clean_df)} rows")
 
 
 # ══════════════════════════════════════════════════════════════════════════
-#  CLI ENTRY POINT
+#  CLI
 # ══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="G.O.D.S E.Y.E — NSE Bhavcopy Downloader"
+        description="G.O.D.S E.Y.E — Daily Data Ingestion (Kite + NSE)"
     )
     parser.add_argument(
         "--mode",
         choices=["daily", "backfill", "single"],
         required=True,
-        help=(
-            "daily    : Download latest trading day (run nightly)\n"
-            "backfill : Load full history from --start date\n"
-            "single   : Download one specific --date"
-        )
     )
     parser.add_argument(
         "--start",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
         default=date(2019, 1, 1),
-        help="Start date for backfill mode (YYYY-MM-DD). Default: 2019-01-01"
+        help="Start date for backfill (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--date",
         type=lambda s: datetime.strptime(s, "%Y-%m-%d").date(),
-        help="Specific date for single mode (YYYY-MM-DD)"
+        help="Specific date for single mode (YYYY-MM-DD)",
     )
 
     args = parser.parse_args()
 
     if args.mode == "daily":
         run_daily()
-
     elif args.mode == "backfill":
         run_backfill(args.start)
-
     elif args.mode == "single":
         if not args.date:
             parser.error("--date is required for single mode")
