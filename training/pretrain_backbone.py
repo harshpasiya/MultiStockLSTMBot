@@ -252,12 +252,14 @@ def _load_basic_features_from_ohlcv(
     history_start = start_date - timedelta(days=30)
 
     sql = """
-        SELECT date, symbol, open, high, low, close, prev_close, volume
-        FROM daily_ohlcv
-        WHERE date BETWEEN %s AND %s
-          AND close > 0 AND volume > 0
-        ORDER BY date ASC, symbol ASC
-    """
+            SELECT date, symbol,
+                   open::float, high::float, low::float,
+                   close::float, prev_close::float, volume::float
+            FROM daily_ohlcv
+            WHERE date BETWEEN %s AND %s
+              AND close > 0 AND volume > 0
+            ORDER BY date ASC, symbol ASC
+        """
     with conn.cursor() as cur:
         cur.execute(sql, (history_start, end_date))
         rows = cur.fetchall()
