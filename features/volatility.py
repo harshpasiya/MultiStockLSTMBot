@@ -114,50 +114,49 @@ def _ensure_features_table(conn):
     """Creates features_volatility table if it doesn't exist."""
     with conn.cursor() as cur:
         cur.execute("""
-            CREATE TABLE IF NOT EXISTS features_volatility (
-                date                DATE        NOT NULL,
-                symbol              VARCHAR(20) NOT NULL,
+                    CREATE TABLE IF NOT EXISTS features_volatility (
+                        date                DATE        NOT NULL,
+                        symbol              VARCHAR(20) NOT NULL,
 
-                -- ATR features
-                atr_14              NUMERIC(12,4),   -- absolute ATR in ₹
-                atr_pct             NUMERIC(6,4),    -- ATR as % of close price
-                atr_zscore          NUMERIC(6,4),    -- ATR z-score vs 60-day
+                        -- ATR features
+                        atr_14              NUMERIC(12,4),   -- absolute ATR in ₹
+                        atr_pct             NUMERIC(12,4),   -- ATR as % of close price
+                        atr_zscore          NUMERIC(12,4),   -- ATR z-score vs 60-day
 
-                -- Historical Volatility
-                hv_20               NUMERIC(6,4),    -- 20-day HV (annualized %)
-                hv_percentile       NUMERIC(5,1),    -- HV rank [0, 100] vs 252-day
-                hv_zscore           NUMERIC(6,4),    -- HV z-score vs 252-day
+                        -- Historical Volatility
+                        hv_20               NUMERIC(12,4),   -- 20-day HV (annualized %)
+                        hv_percentile       NUMERIC(5,1),    -- HV rank [0, 100] vs 252-day
+                        hv_zscore           NUMERIC(12,4),   -- HV z-score vs 252-day
 
-                -- Implied Volatility (from options chain, may be NULL)
-                iv_atm              NUMERIC(6,4),    -- ATM implied volatility
-                iv_rank             NUMERIC(5,1),    -- IV rank [0, 100] vs 252-day
-                iv_hv_spread        NUMERIC(6,4),    -- IV - HV (vol premium/discount)
+                        -- Implied Volatility (from options chain, may be NULL)
+                        iv_atm              NUMERIC(12,4),   -- ATM implied volatility
+                        iv_rank             NUMERIC(5,1),    -- IV rank [0, 100] vs 252-day
+                        iv_hv_spread        NUMERIC(12,4),   -- IV - HV (vol premium/discount)
 
-                -- GARCH(1,1) forecast
-                garch_forecast      NUMERIC(6,4),    -- 1-day ahead vol forecast
-                garch_available     BOOLEAN,         -- False if insufficient data
+                        -- GARCH(1,1) forecast
+                        garch_forecast      NUMERIC(12,4),   -- 1-day ahead vol forecast
+                        garch_available     BOOLEAN,         -- False if insufficient data
 
-                -- Beta
-                beta_nifty          NUMERIC(6,4),    -- 60-day rolling beta to Nifty
-                beta_available      BOOLEAN,
+                        -- Beta
+                        beta_nifty          NUMERIC(12,4),   -- 60-day rolling beta to Nifty
+                        beta_available      BOOLEAN,
 
-                -- Dynamic TP/SL (computed from ATR)
-                swing_tp_pct        NUMERIC(5,2),    -- recommended swing TP %
-                swing_sl_pct        NUMERIC(5,2),    -- recommended swing SL %
-                intra_tp_pct        NUMERIC(5,2),    -- recommended intraday TP %
-                intra_sl_pct        NUMERIC(5,2),    -- recommended intraday SL %
+                        -- Dynamic TP/SL (computed from ATR)
+                        swing_tp_pct        NUMERIC(8,2),    -- recommended swing TP %
+                        swing_sl_pct        NUMERIC(8,2),    -- recommended swing SL %
+                        intra_tp_pct        NUMERIC(8,2),    -- recommended intraday TP %
+                        intra_sl_pct        NUMERIC(8,2),    -- recommended intraday SL %
 
-                -- Regime classification
-                vol_regime          VARCHAR(10),     -- low/medium/high/extreme
-                vol_regime_code     SMALLINT,        -- 0=low,1=med,2=high,3=extreme
+                        -- Regime classification
+                        vol_regime          VARCHAR(10),     -- low/medium/high/extreme
+                        vol_regime_code     SMALLINT,        -- 0=low,1=med,2=high,3=extreme
 
-                -- Composite volatility score for LSTM [-1, +1]
-                -- Positive = high vol (caution), Negative = low vol (opportunity)
-                volatility_score    NUMERIC(5,4),
+                        -- Composite volatility score for LSTM [-1, +1]
+                        volatility_score    NUMERIC(8,4),
 
-                PRIMARY KEY (date, symbol)
-            );
-        """)
+                        PRIMARY KEY (date, symbol)
+                    );
+                """)
 
         cur.execute("""
             SELECT create_hypertable(
