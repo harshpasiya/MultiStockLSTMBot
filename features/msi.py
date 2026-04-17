@@ -108,6 +108,7 @@ def _ensure_features_table(conn):
     Creates features_msi table if it doesn't exist.
     Stores all MSI sub-components and the final MSI score.
     """
+    conn.rollback()
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS features_msi (
@@ -146,13 +147,17 @@ def _ensure_features_table(conn):
             );
         """)
 
-        cur.execute("""
-            SELECT create_hypertable(
-                'features_msi', 'date',
-                if_not_exists => TRUE,
-                migrate_data  => TRUE
-            );
-        """)
+        # Convert to TimescaleDB hypertable
+        try:
+            cur.execute("""
+                        SELECT create_hypertable(
+                            'features_msi', 'date',
+                            if_not_exists => TRUE,
+                            migrate_data  => TRUE
+                        )
+                    """)
+        except Exception:
+            pass  # already a hypertable or not supported — continue
 
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_features_msi_symbol
@@ -707,7 +712,7 @@ class MSIExtractor:
 
     def _save(self, symbol: str, df: pd.DataFrame):
         """Upserts MSI features into features_msi. Safe to re-run."""
-
+        self.conn.rollback()
         records = []
         for ts, row in df.iterrows():
             def _val(col, default=None):
