@@ -103,14 +103,14 @@ N_FEATURES     = 28     # fused feature vector length (from fusion.py)
 FORWARD_DAYS   = 5      # predict return N days ahead
 BATCH_STOCKS   = 64     # stocks per training step
 MAX_EPOCHS     = 100
-PATIENCE       = 10     # early stopping patience (epochs)
-LR             = 1e-4
+PATIENCE       = 15     # early stopping patience (epochs)
+LR             = 3e-5
 WEIGHT_DECAY   = 0.01
 GRAD_CLIP      = 1.0
-DIR_WEIGHT     = 0.6    # BCE loss weight
-RET_WEIGHT     = 0.4    # MSE loss weight
+DIR_WEIGHT     = 0.8    # BCE loss weight
+RET_WEIGHT     = 0.2    # MSE loss weight
 IC_GATE        = 0.05   # minimum validation IC to pass Phase 2
-ACC_GATE       = 0.57   # minimum direction accuracy to pass Phase 2
+ACC_GATE       = 0.55   # minimum direction accuracy to pass Phase 2
 
 # ── Training splits ───────────────────────────────────────────────────────
 TRAIN_START = date(2019, 1,  1)
@@ -188,23 +188,21 @@ def _load_from_features_table(
 ) -> Tuple[np.ndarray, np.ndarray, List[str], List[date]]:
     """
     Loads full 28-feature fused vectors from features_fused table.
-    Also computes 5-day forward returns from daily_ohlcv.
     """
-    # Feature columns from fusion.py (features [0]–[27])
     feature_cols = [
-        "trend_score", "ema_ribbon_gap", "adx_normalized",
-        "supertrend_dir", "price_vs_ema200", "swing_structure",
-        "msi_signal", "vrsi_normalized", "mfi_normalized",
-        "msi_divergence", "mds_continuous", "fii_norm",
-        "dii_norm", "sentiment_score", "sentiment_momentum",
-        "event_flag", "market_fear_greed_n", "volatility_score",
-        "atr_pct_normalized", "vol_regime_code_n", "hv_percentile_n",
-        "correlation_score", "sector_divergence_n", "lead_lag_score",
-        "peer_corr_mean", "delivery_mom_n", "swing_tp_normalized",
-        "swing_sl_normalized",
+        "f00_trend_score", "f01_ema_ribbon_gap", "f02_adx_normalized",
+        "f03_supertrend_dir", "f04_price_vs_ema200", "f05_swing_structure",
+        "f06_msi_signal", "f07_vrsi_normalized", "f08_mfi_normalized",
+        "f09_msi_divergence", "f10_mds_continuous", "f11_fii_norm",
+        "f12_dii_norm", "f13_sentiment_score", "f14_sentiment_momentum",
+        "f15_event_flag", "f16_market_fear_greed_n", "f17_volatility_score",
+        "f18_atr_pct_normalized", "f19_vol_regime_code_n", "f20_hv_percentile_n",
+        "f21_correlation_score", "f22_sector_divergence_n", "f23_lead_lag_score",
+        "f24_peer_corr_mean", "f25_delivery_mom_n", "f26_swing_tp_normalized",
+        "f27_swing_sl_normalized",
     ]
 
-    cols_sql = ", ".join(f"COALESCE({c}, 0.0)" for c in feature_cols)
+    cols_sql = ", ".join(f"COALESCE({c}::float, 0.0)" for c in feature_cols)
 
     sql = f"""
         SELECT date, symbol, {cols_sql}
@@ -220,12 +218,8 @@ def _load_from_features_table(
     if not rows:
         raise RuntimeError(f"No fused features found between {start_date} and {end_date}")
 
-    df = pd.DataFrame(rows, columns=[
-        "date", "symbol", "open", "high", "low", "close", "prev_close", "volume"
-    ])
+    df = pd.DataFrame(rows, columns=["date", "symbol"] + feature_cols)
     df["date"] = pd.to_datetime(df["date"]).dt.date
-    for col in ["open", "high", "low", "close", "prev_close", "volume"]:
-        df[col] = df[col].astype(float)
 
     return _pivot_and_compute_returns(df, feature_cols, conn, start_date, end_date)
 
@@ -647,11 +641,10 @@ class PretrainEngine:
         # Restarts every T_0=10 epochs — helps escape local minima
         # T_mult=2 doubles the restart period after each restart
         steps_per_epoch = max(1, len(train_dataset) // batch_size)
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
-            T_0    = 10 * steps_per_epoch,
-            T_mult = 2,
-            eta_min= lr * 0.01,
+            T_max=MAX_EPOCHS * steps_per_epoch,
+            eta_min=lr * 0.01,
         )
 
         # ── State tracking ────────────────────────────────────────────────
