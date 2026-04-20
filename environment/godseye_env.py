@@ -979,7 +979,9 @@ class GodsEyeEnv(gym.Env):
         # Run backbone
         x = torch.tensor(np.stack(features), dtype=torch.float32).to(self.device)
         with torch.no_grad():
-            embeddings = self.backbone(x).cpu().numpy()  # (N, 128)
+            out = self.backbone(x)
+            # GodsEyeBackbone returns (embedding, aux) tuple or plain tensor
+            embeddings = (out[0] if isinstance(out, tuple) else out).cpu().numpy()
 
         # Rank by embedding norm (proxy for signal confidence)
         norms = np.linalg.norm(embeddings, axis=1)
