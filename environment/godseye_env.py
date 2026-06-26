@@ -283,6 +283,7 @@ class MarketDataLoader:
             f"MarketDataLoader: {len(self._symbols)} symbols loaded, "
             f"{len(self._trading_dates)} trading dates."
         )
+        self.load_embeddings()
 
     @property
     def symbols(self) -> List[str]:
@@ -322,6 +323,55 @@ class MarketDataLoader:
             "close" : float(row["close"]),
             "volume": float(row["volume"]),
         }
+
+    def load_embeddings(self):
+        """
+        Loads all pre-computed backbone embeddings from backbone_embeddings
+        table into memory. Call once after load().
+
+        Stores as: self._embeddings[symbol][date_str] = np.array(128,)
+        """
+        import psycopg2, os
+        from loguru import logger
+
+        DB_URL = os.getenv(
+            "TIMESCALE_URL",
+            "postgresql://godseye_user:godseye_pass@localhost:5433/godseye"
+        )
+
+        logger.info("Loading pre-computed embeddings from DB...")
+        self._embeddings: dict = {}
+
+        try:
+            conn = psycopg2.connect(DB_URL)
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT symbol, date, embedding
+                    FROM backbone_embeddings
+                    ORDER BY symbol, date;
+                """)
+                rows = cur.fetchall()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Could not load embeddings: {e}. Will use zeros.")
+            self._embeddings_loaded = False
+            return
+
+        import numpy as np
+        for sym, date, emb in rows:
+            if sym not in self._embeddings:
+                self._embeddings[sym] = {}
+            self._embeddings[sym][str(date)] = np.array(emb, dtype=np.float32)
+
+        self._embeddings_loaded = True
+        logger.info(
+            f"Embeddings loaded: {len(self._embeddings)} symbols "
+            f"({len(rows):,} total vectors)"
+        )
+
+    def get_embedding(self, symbol: str, date_str: str):
+        """Returns pre-computed embedding for symbol on date_str, or None."""
+        return self._embeddings.get(symbol, {}).get(date_str, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -896,45 +946,77 @@ class GodsEyeEnv(gym.Env):
 
     def _update_universe(self):
         """
-        Selects the top-N_stocks by backbone embedding score for this bar.
-
-        If backbone is not available (e.g., during unit testing),
-        uses random selection from available symbols.
+        Fast universe update using pre-computed embeddings from DB.
+        O(n_stocks) lookup instead of O(n_stocks × seq_len) backbone inference.
+        Expected time per call: ~0.5ms vs ~200ms for live inference.
         """
-        global_bar = self.episode_start + self.current_bar
-        available  = [
-            sym for sym in self.data_loader.symbols
-            if self.data_loader.get_price(sym, global_bar) is not None
-        ]
+        import numpy as np
 
-        if not available:
-            self.current_symbols   = []
+        global_bar = self.episode_start + self.current_bar
+
+        # Get date string for this bar
+        if global_bar >= len(self.data_loader.trading_dates):
+            self.current_symbols = []
             self.current_embeddings = np.zeros(
-                (self.n_stocks, EMBEDDING_DIM), dtype=np.float32
+                (self.n_stocks, 128), dtype=np.float32
             )
             return
 
-        if self.backbone is not None:
-            # Use backbone to score and rank stocks
-            self.current_symbols, self.current_embeddings = (
-                self._score_with_backbone(available, global_bar)
-            )
-        else:
-            # Fallback: random selection (used in unit tests)
-            chosen = available[:self.n_stocks]
-            self.current_symbols   = chosen
-            self.current_embeddings = np.random.randn(
-                len(chosen), EMBEDDING_DIM
-            ).astype(np.float32)
+        date_str = self.data_loader.trading_dates[global_bar]
 
-        # Pad to n_stocks if fewer available
-        n_available = len(self.current_symbols)
-        if n_available < self.n_stocks:
-            pad = self.n_stocks - n_available
-            self.current_embeddings = np.vstack([
-                self.current_embeddings,
-                np.zeros((pad, EMBEDDING_DIM), dtype=np.float32),
+        # Check if embeddings are pre-loaded
+        if not getattr(self.data_loader, "_embeddings_loaded", False):
+            # Fall back to random (no backbone, no precomputed)
+            available = [
+                sym for sym in self.data_loader.symbols
+                if self.data_loader.get_price(sym, global_bar) is not None
+            ]
+            chosen = available[:self.n_stocks]
+            self.current_symbols = chosen
+            self.current_embeddings = np.random.randn(
+                len(chosen), 128
+            ).astype(np.float32)
+            if len(chosen) < self.n_stocks:
+                pad = self.n_stocks - len(chosen)
+                self.current_embeddings = np.vstack([
+                    self.current_embeddings,
+                    np.zeros((pad, 128), dtype=np.float32),
+                ])
+            return
+
+        # ── Fast path: lookup pre-computed embeddings ─────────────────────────
+        scored = []
+        for sym in self.data_loader.symbols:
+            emb = self.data_loader.get_embedding(sym, date_str)
+            if emb is None:
+                continue
+            price = self.data_loader.get_price(sym, global_bar)
+            if price is None:
+                continue
+            norm = float(np.linalg.norm(emb))
+            scored.append((sym, emb, norm))
+
+        # Sort by embedding norm (proxy for signal strength)
+        scored.sort(key=lambda x: x[2], reverse=True)
+        top = scored[:self.n_stocks]
+
+        self.current_symbols = [s[0] for s in top]
+        embeddings = [s[1] for s in top]
+
+        if embeddings:
+            emb_arr = np.stack(embeddings).astype(np.float32)
+        else:
+            emb_arr = np.zeros((0, 128), dtype=np.float32)
+
+        # Pad to n_stocks
+        if len(emb_arr) < self.n_stocks:
+            pad = self.n_stocks - len(emb_arr)
+            emb_arr = np.vstack([
+                emb_arr,
+                np.zeros((pad, 128), dtype=np.float32),
             ])
+
+        self.current_embeddings = emb_arr
 
     def _score_with_backbone(
         self,
