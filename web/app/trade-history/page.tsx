@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { TradesFilterBar } from '@/components/trades-filter-bar';
 import { TradesTable } from '@/components/trades-table';
 import { TradesCardView } from '@/components/trades-card-view';
