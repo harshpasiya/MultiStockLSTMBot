@@ -10,18 +10,18 @@ export function TopBar() {
       {/* Left: mobile logo + paper mode badge */}
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2 md:hidden">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-gradient">
-            <Eye className="h-4 w-4 text-background" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-subtle">
+            <Eye className="h-4 w-4 text-foreground" />
           </div>
           <span className="font-semibold tracking-tight">Zodiac Godseye</span>
         </div>
 
-        <span className="hidden text-lg font-semibold tracking-tight text-gradient md:inline">
+        <span className="hidden text-lg font-semibold tracking-tight text-foreground md:inline">
           Zodiac Godseye
         </span>
 
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-accent-cyan/30 bg-accent-cyan/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-accent-cyan">
-          <span className="h-1.5 w-1.5 rounded-full bg-accent-cyan animate-status-pulse" />
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-muted bg-accent-subtle px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-status-pulse" />
           Paper Mode
         </span>
       </div>

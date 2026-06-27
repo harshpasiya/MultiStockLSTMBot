@@ -1,22 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0e1a;
-  --foreground: #e6e9f2;
+  /* Dark monochrome - Notion inspired */
+  --background: #1a1a1a;
+  --foreground: #e5e5e5;
 
-  --card: #12172a;
-  --card-foreground: #e6e9f2;
-  --border: #1f2740;
-  --muted: #8a93ad;
-  --muted-foreground: #6b7490;
+  --card: #252525;
+  --card-foreground: #e5e5e5;
+  --border: #3a3a3a;
+  --muted: #a0a0a0;
+  --muted-foreground: #767676;
 
-  --accent-purple: #7c3aed;
-  --accent-cyan: #06b6d4;
+  /* Minimal accents - subtle grays and status colors only */
+  --accent-subtle: #444444;
+  --accent-hover: #383838;
 
-  --positive: #22c55e;
-  --negative: #ef4444;
+  --positive: #4ade80;
+  --negative: #f87171;
 
-  --radius: 0.75rem;
+  --radius: 0.5rem;
 }
 
 @theme inline {
@@ -28,8 +30,8 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
 
-  --color-accent-purple: var(--accent-purple);
-  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-hover: var(--accent-hover);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
 
@@ -37,8 +39,8 @@
   --font-mono: var(--font-geist-mono);
 
   --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-sm: calc(var(--radius) - 2px);
 }
 
 * {
@@ -56,37 +58,33 @@ body {
 .bg-dot-grid {
   background-image: radial-gradient(
     circle at center,
-    rgba(124, 58, 237, 0.07) 1px,
+    rgba(200, 200, 200, 0.04) 1px,
     transparent 1px
   );
-  background-size: 22px 22px;
+  background-size: 24px 24px;
 }
 
-/* Accent gradient text */
+/* No gradient text - keep monochrome */
 .text-gradient {
-  background: linear-gradient(90deg, var(--accent-purple), var(--accent-cyan));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--foreground);
 }
 
 .bg-accent-gradient {
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
+  background-color: var(--accent-subtle);
 }
 
-/* Card hover: lift + accent glow */
+/* Card hover: subtle lift + background change */
 .card-hover {
   transition:
     transform 200ms ease,
-    box-shadow 200ms ease,
+    background-color 200ms ease,
     border-color 200ms ease;
 }
 .card-hover:hover {
   transform: translateY(-2px);
-  border-color: rgba(124, 58, 237, 0.5);
-  box-shadow:
-    0 8px 24px -8px rgba(124, 58, 237, 0.35),
-    0 0 0 1px rgba(6, 182, 212, 0.15);
+  background-color: var(--accent-hover);
+  border-color: var(--muted-foreground);
+  box-shadow: none;
 }
 
 /* Pulse dot for system status */
@@ -114,9 +112,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 8px;
+  background: var(--accent-subtle);
+  border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a3354;
+  background: var(--muted);
 }

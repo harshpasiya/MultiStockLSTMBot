@@ -41,8 +41,8 @@ export default function OverviewPage() {
                 <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   {stat.label}
                 </span>
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background/40">
-                  <Icon className="h-4 w-4 text-accent-cyan" />
+                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent-subtle bg-accent-subtle">
+                  <Icon className="h-4 w-4 text-muted" />
                 </span>
               </div>
               <p className="mt-4 font-mono text-2xl font-semibold tracking-tight">

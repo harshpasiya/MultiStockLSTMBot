@@ -21,8 +21,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     >
       {/* Brand / logo */}
       <div className="flex h-16 items-center gap-3 px-4 border-b border-border">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-gradient">
-          <Eye className="h-5 w-5 text-background" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-subtle">
+          <Eye className="h-5 w-5 text-foreground" />
         </div>
         {!collapsed && (
           <div className="flex flex-col leading-tight overflow-hidden">
@@ -52,16 +52,16 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                   title={collapsed ? item.label : undefined}
                   className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                     active
-                      ? "bg-accent-purple/15 text-foreground"
-                      : "text-muted-foreground hover:bg-card hover:text-foreground"
+                      ? "bg-accent-subtle text-foreground"
+                      : "text-muted-foreground hover:bg-accent-hover hover:text-foreground"
                   } ${collapsed ? "justify-center" : ""}`}
                 >
                   {active && (
-                    <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-accent-gradient" />
+                    <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-foreground" />
                   )}
                   <Icon
                     className={`h-5 w-5 shrink-0 ${
-                      active ? "text-accent-cyan" : ""
+                      active ? "text-foreground" : ""
                     }`}
                   />
                   {!collapsed && (
