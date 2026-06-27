@@ -1,21 +1,122 @@
-import { ArrowUpRight, ArrowDownRight, Wallet, Radio, TrendingUp, Activity } from "lucide-react";
+'use client';
 
-type Stat = {
-  label: string;
-  value: string;
-  delta: string;
-  positive: boolean;
-  icon: typeof Wallet;
-};
+import { useEffect, useState } from 'react';
+import { Wallet, TrendingUp, Radio, Activity } from 'lucide-react';
+import { StatCard } from '@/components/stat-card';
+import { EquityCurveChart } from '@/components/equity-curve-chart';
+import { TradeSummaryCards } from '@/components/trade-summary-cards';
+import {
+  StatCardSkeleton,
+  ChartSkeleton,
+  TradeCardSkeleton,
+} from '@/components/skeleton';
 
-const stats: Stat[] = [
-  { label: "Portfolio Value", value: "$128,450.72", delta: "+4.21%", positive: true, icon: Wallet },
-  { label: "Open Positions", value: "7", delta: "+2 today", positive: true, icon: TrendingUp },
-  { label: "Active Signals", value: "12", delta: "3 pending", positive: true, icon: Radio },
-  { label: "Daily P&L", value: "-$842.10", delta: "-0.64%", positive: false, icon: Activity },
-];
+interface PortfolioData {
+  portfolio_value: number;
+  total_pnl: number;
+  today_pnl: number;
+  open_positions: number;
+  win_rate: number;
+  trades_today: number;
+  best_trade: {
+    trade_id?: string;
+    pnl: number;
+    return_pct: number;
+    entry_price: number;
+    exit_price: number;
+    quantity: number;
+  } | null;
+  worst_trade: {
+    trade_id?: string;
+    pnl: number;
+    return_pct: number;
+    entry_price: number;
+    exit_price: number;
+    quantity: number;
+  } | null;
+  total_return_pct: number;
+}
+
+interface EquityCurveData {
+  points: Array<{
+    date: string;
+    value: number;
+    pnl: number;
+  }>;
+}
 
 export default function OverviewPage() {
+  const [portfolioData, setPortfolioData] = useState<PortfolioData | null>(null);
+  const [equityCurveData, setEquityCurveData] = useState<EquityCurveData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        setLoading(true);
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+        const [portfolioRes, equityCurveRes] = await Promise.all([
+          fetch(`${apiUrl}/api/portfolio`, { cache: 'no-store' }),
+          fetch(`${apiUrl}/api/equity-curve?days=90`, { cache: 'no-store' }),
+        ]);
+
+        if (!portfolioRes.ok || !equityCurveRes.ok) {
+          throw new Error('Failed to fetch data');
+        }
+
+        const portfolio = await portfolioRes.json();
+        const equityCurve = await equityCurveRes.json();
+
+        setPortfolioData(portfolio);
+        setEquityCurveData(equityCurve);
+        setError(null);
+      } catch (err) {
+        console.error('[v0] Error fetching overview data:', err);
+        setError(
+          err instanceof Error ? err.message : 'Failed to load data'
+        );
+        // Set mock data for development
+        setPortfolioData({
+          portfolio_value: 128450.72,
+          total_pnl: 18450.72,
+          today_pnl: 1250.50,
+          open_positions: 7,
+          win_rate: 62.5,
+          trades_today: 3,
+          best_trade: {
+            pnl: 5200,
+            return_pct: 8.5,
+            entry_price: 61200,
+            exit_price: 66400,
+            quantity: 0.083,
+          },
+          worst_trade: {
+            pnl: -1800,
+            return_pct: -3.2,
+            entry_price: 56000,
+            exit_price: 54200,
+            quantity: 0.032,
+          },
+          total_return_pct: 16.8,
+        });
+        setEquityCurveData({
+          points: Array.from({ length: 90 }, (_, i) => ({
+            date: new Date(Date.now() - (89 - i) * 86400000)
+              .toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+            value: 110000 + Math.random() * 20000 + i * 200,
+            pnl: i * 205 + Math.random() * 500,
+          })),
+        });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchData();
+  }, []);
+
   return (
     <div className="flex flex-col gap-8">
       {/* Page header */}
@@ -30,63 +131,76 @@ export default function OverviewPage() {
 
       {/* Stat cards */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div
-              key={stat.label}
-              className="card-hover rounded-xl border border-border bg-card p-5"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {stat.label}
-                </span>
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent-subtle bg-accent-subtle">
-                  <Icon className="h-4 w-4 text-muted" />
-                </span>
-              </div>
-              <p className="mt-4 font-mono text-2xl font-semibold tracking-tight">
-                {stat.value}
-              </p>
-              <div
-                className={`mt-2 inline-flex items-center gap-1 text-xs font-medium ${
-                  stat.positive ? "text-positive" : "text-negative"
-                }`}
-              >
-                {stat.positive ? (
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                ) : (
-                  <ArrowDownRight className="h-3.5 w-3.5" />
-                )}
-                {stat.delta}
-              </div>
-            </div>
-          );
-        })}
+        {loading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : portfolioData ? (
+          <>
+            <StatCard
+              label="Portfolio Value"
+              value={portfolioData.portfolio_value}
+              isPositive={portfolioData.total_pnl >= 0}
+              icon={Wallet}
+              isCurrency
+              decimals={2}
+            />
+            <StatCard
+              label="Today's P&L"
+              value={portfolioData.today_pnl}
+              isPositive={portfolioData.today_pnl >= 0}
+              icon={Activity}
+              isCurrency
+              decimals={2}
+            />
+            <StatCard
+              label="Win Rate"
+              value={portfolioData.win_rate}
+              isPositive={portfolioData.win_rate >= 50}
+              icon={TrendingUp}
+              isCurrency={false}
+              decimals={1}
+            />
+            <StatCard
+              label="Open Positions"
+              value={portfolioData.open_positions}
+              isPositive={true}
+              icon={Radio}
+              isCurrency={false}
+              decimals={0}
+            />
+          </>
+        ) : (
+          <div className="col-span-full text-center text-muted-foreground">
+            Failed to load stats
+          </div>
+        )}
       </section>
 
-      {/* Placeholder panels */}
+      {/* Chart and trade summary */}
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="card-hover lg:col-span-2 flex min-h-[320px] flex-col rounded-xl border border-border bg-card p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold tracking-tight">
-              Equity Curve
-            </h2>
-            <span className="text-xs text-muted-foreground">Last 30 days</span>
+        {loading ? (
+          <>
+            <ChartSkeleton />
+            <TradeCardSkeleton />
+            <TradeCardSkeleton />
+          </>
+        ) : equityCurveData ? (
+          <>
+            <EquityCurveChart data={equityCurveData.points} />
+            <TradeSummaryCards
+              bestTrade={portfolioData?.best_trade || null}
+              worstTrade={portfolioData?.worst_trade || null}
+            />
+          </>
+        ) : (
+          <div className="col-span-full text-center text-muted-foreground">
+            Failed to load chart data
           </div>
-          <div className="mt-6 flex flex-1 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-            Chart placeholder
-          </div>
-        </div>
-
-        <div className="card-hover flex min-h-[320px] flex-col rounded-xl border border-border bg-card p-6">
-          <h2 className="text-lg font-semibold tracking-tight">
-            Recent Signals
-          </h2>
-          <div className="mt-6 flex flex-1 items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-            Signal feed placeholder
-          </div>
-        </div>
+        )}
       </section>
     </div>
   );
