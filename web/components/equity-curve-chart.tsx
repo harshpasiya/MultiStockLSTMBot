@@ -8,9 +8,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  defs,
-  linearGradient,
-  stop,
 } from 'recharts';
 import { formatCurrency } from '@/lib/utils';
 
@@ -80,8 +77,8 @@ export function EquityCurveChart({ data }: EquityCurveChartProps) {
           <LineChart data={data}>
             <defs>
               <linearGradient id="equityGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#a0a0a0" stopOpacity={0.25} />
-                <stop offset="100%" stopColor="#a0a0a0" stopOpacity={0} />
+                <stop offset="0%" stopColor="#a0a0a0" stopOpacity={0.25}/>
+                <stop offset="100%" stopColor="#a0a0a0" stopOpacity={0}/>
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#3a3a3a" vertical={false} />
