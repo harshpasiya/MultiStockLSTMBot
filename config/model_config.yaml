@@ -118,4 +118,4 @@ pillar_weights:
   sentiment: 0.15
   volatility: 0.15
   correlation: 0.10
-  # Note: weights auto-adjusted by RL agent during training
+  # Note: weights auto-adjusted by RL agent during training.
