@@ -39,7 +39,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <ul className="flex flex-col gap-1">
-          {navItems.map((item) => {
+          {navItems.map((item, index) => {
+            if (item.divider) {
+              return (
+                <li key={`divider-${index}`} className="my-2">
+                  <div className="h-px bg-border" />
+                </li>
+              );
+            }
+
             const active =
               item.href === "/"
                 ? pathname === "/"

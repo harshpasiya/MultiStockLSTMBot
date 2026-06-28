@@ -1,23 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  /* Dark monochrome - Notion inspired */
-  --background: #1a1a1a;
-  --foreground: #e5e5e5;
-
-  --card: #252525;
-  --card-foreground: #e5e5e5;
-  --border: #3a3a3a;
-  --muted: #a0a0a0;
-  --muted-foreground: #767676;
-
-  /* Minimal accents - subtle grays and status colors only */
-  --accent-subtle: #444444;
-  --accent-hover: #383838;
-
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #000000;
+  --card-foreground: #ffffff;
+  --border: #1a1a1a;
+  --muted: #b3b3b3;
+  --muted-foreground: #666666;
+  --accent-subtle: #000000;
+  --accent-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: #000000;
+  --input-border: #1a1a1a;
+  --input-focus: #ffffff;
   --positive: #4ade80;
   --negative: #f87171;
-
   --radius: 0.5rem;
 }
 
@@ -29,15 +27,12 @@
   --color-border: var(--border);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-
   --color-accent-subtle: var(--accent-subtle);
   --color-accent-hover: var(--accent-hover);
   --color-positive: var(--positive);
   --color-negative: var(--negative);
-
   --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-geist-mono);
-
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 1px);
   --radius-sm: calc(var(--radius) - 2px);
@@ -56,11 +51,7 @@ body {
 
 /* Subtle dot-grid background pattern for depth */
 .bg-dot-grid {
-  background-image: radial-gradient(
-    circle at center,
-    rgba(200, 200, 200, 0.04) 1px,
-    transparent 1px
-  );
+  background-image: linear-gradient(rgba(200, 200, 200, 0.5) 1px, dotted, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -75,16 +66,23 @@ body {
 
 /* Card hover: subtle lift + background change */
 .card-hover {
-  transition:
-    transform 200ms ease,
-    background-color 200ms ease,
-    border-color 200ms ease;
+  transition: transform 250ms ease, border-color 250ms ease, box-shadow 250ms ease, backdrop-filter 250ms ease;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
 }
+
 .card-hover:hover {
   transform: translateY(-2px);
-  background-color: var(--accent-hover);
-  border-color: var(--muted-foreground);
-  box-shadow: none;
+  /* NO background change */
+  background: rgba(0, 0, 0, 0.65);
+  /* brighter border */
+  border-color: rgba(255, 255, 255, 0.35);
+  /* glass glow */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 /* Pulse dot for system status */
@@ -92,13 +90,16 @@ body {
   0% {
     box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
   }
+
   70% {
     box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
   }
+
   100% {
     box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
   }
 }
+
 .animate-status-pulse {
   animation: status-pulse 2s infinite;
 }
@@ -108,13 +109,15 @@ body {
   width: 8px;
   height: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
 ::-webkit-scrollbar-thumb {
-  background: var(--accent-subtle);
-  border-radius: 6px;
+  background: #202020;
 }
+
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
+  background: #404040;
 }
