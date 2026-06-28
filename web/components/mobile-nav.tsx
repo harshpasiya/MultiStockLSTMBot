@@ -10,6 +10,8 @@ export function MobileNav() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 flex items-stretch justify-around border-t border-border bg-card/90 backdrop-blur-md md:hidden">
       {navItems.map((item) => {
+        if (item.divider) return null;
+
         const active =
           item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
         const Icon = item.icon;
