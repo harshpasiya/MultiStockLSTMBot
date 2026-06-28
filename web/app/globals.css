@@ -1,26 +1,123 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #000000;
+  --card-foreground: #ffffff;
+  --border: #1a1a1a;
+  --muted: #b3b3b3;
+  --muted-foreground: #666666;
+  --accent-subtle: #000000;
+  --accent-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+  --input: #000000;
+  --input-border: #1a1a1a;
+  --input-focus: #ffffff;
+  --positive: #4ade80;
+  --negative: #f87171;
+  --radius: 0.5rem;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-hover: var(--accent-hover);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --font-sans: var(--font-space-grotesk);
   --font-mono: var(--font-geist-mono);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-sm: calc(var(--radius) - 2px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--border);
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-space-grotesk), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle dot-grid background pattern for depth */
+.bg-dot-grid {
+  background-image: linear-gradient(rgba(200, 200, 200, 0.5) 1px, dotted, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* No gradient text - keep monochrome */
+.text-gradient {
+  color: var(--foreground);
+}
+
+.bg-accent-gradient {
+  background-color: var(--accent-subtle);
+}
+
+/* Card hover: subtle lift + background change */
+.card-hover {
+  transition: transform 250ms ease, border-color 250ms ease, box-shadow 250ms ease, backdrop-filter 250ms ease;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+}
+
+.card-hover:hover {
+  transform: translateY(-2px);
+  /* NO background change */
+  background: rgba(0, 0, 0, 0.65);
+  /* brighter border */
+  border-color: rgba(255, 255, 255, 0.35);
+  /* glass glow */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* Pulse dot for system status */
+@keyframes status-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+  }
+
+  70% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+  }
+}
+
+.animate-status-pulse {
+  animation: status-pulse 2s infinite;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #202020;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #404040;
 }
