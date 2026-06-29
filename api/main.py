@@ -1,51 +1,50 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════╗
-║         G.O.D.S E.Y.E — FastAPI Signal Broadcast Server                  ║
+║         G.O.D.S E.Y.E — FastAPI Signal Broadcast Server                 ║
 ║         Project : MultiStockLSTMBot                                      ║
 ║         File    : api/main.py                                            ║
-║         Phase   : 5 — Subscriber Infrastructure                          ║
+║         Phase   : 5 — Subscriber Infrastructure                         ║
 ║                                                                          ║
 ║  What this module does:                                                  ║
-║    REST API server that exposes G.O.D.S E.Y.E signals and subscriber     ║
-║    management to external clients (web dashboard, mobile app,            ║
-║    distributor portals, programmatic trading bots).                      ║
+║    REST API server that exposes G.O.D.S E.Y.E signals and subscriber    ║
+║    management to external clients (web dashboard, mobile app,           ║
+║    distributor portals, programmatic trading bots).                     ║
 ║                                                                          ║
 ║  Run:                                                                    ║
-║    uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload              ║
+║    uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload            ║
 ║                                                                          ║
 ║  Endpoints:                                                              ║
-║    POST /auth/register        — create subscriber account                ║
-║    POST /auth/login           — get JWT token                            ║
-║    POST /auth/logout          — revoke JWT token                         ║
+║    POST /auth/register        — create subscriber account               ║
+║    POST /auth/login           — get JWT token                           ║
+║    POST /auth/logout          — revoke JWT token                        ║
 ║                                                                          ║
-║    GET  /signals/latest       — latest signals for today                 ║
-║    GET  /signals/history      — signal history with date filter          ║
+║    GET  /signals/latest       — latest signals for today                ║
+║    GET  /signals/history      — signal history with date filter         ║
 ║    GET  /portfolio            — subscriber portfolio snapshot            ║
 ║    GET  /trades               — trade history with filters               ║
 ║                                                                          ║
-║    POST /subscriber/onboard   — connect broker account                   ║
-║    GET  /subscriber/profile   — get subscriber profile                   ║
-║    PUT  /subscriber/plan      — upgrade/downgrade plan                   ║
+║    POST /subscriber/onboard   — connect broker account                  ║
+║    GET  /subscriber/profile   — get subscriber profile                  ║
+║    PUT  /subscriber/plan      — upgrade/downgrade plan                  ║
 ║                                                                          ║
-║    GET  /admin/stats          — system-wide stats (admin only)           ║
-║    GET  /admin/subscribers    — all subscribers (admin only)             ║
-║    GET  /distributor/stats    — distributor dashboard stats              ║
-║    POST /distributor/referral — create referral code                     ║
+║    GET  /admin/stats          — system-wide stats (admin only)          ║
+║    GET  /admin/subscribers    — all subscribers (admin only)            ║
+║    GET  /distributor/stats    — distributor dashboard stats             ║
+║    POST /distributor/referral — create referral code                    ║
 ║                                                                          ║
-║    GET  /health               — system health check                      ║
-║    GET  /metrics/summary      — key performance metrics                  ║
+║    GET  /health               — system health check                     ║
+║    GET  /metrics/summary      — key performance metrics                 ║
 ║                                                                          ║
 ║  Auth:                                                                   ║
-║    JWT Bearer token for subscribers                                      ║
-║    API Key header (X-API-Key) for distributors/programmatic access       ║
+║    JWT Bearer token for subscribers                                     ║
+║    API Key header (X-API-Key) for distributors/programmatic access      ║
 ║                                                                          ║
 ║  Dependencies:                                                           ║
-║    pip install fastapi uvicorn python-jose[cryptography] passlib[bcrypt] ║
+║    pip install fastapi uvicorn python-jose[cryptography] passlib[bcrypt]║
 ╚══════════════════════════════════════════════════════════════════════════╝
 """
 
 from __future__ import annotations
-from api.dashboard_routes import router as dashboard_router
 
 import os
 import time
@@ -55,6 +54,7 @@ from datetime    import datetime, date, timedelta
 from typing      import Optional, List, Dict, Any
 from loguru      import logger
 from dotenv      import load_dotenv
+from contextlib  import asynccontextmanager
 
 load_dotenv()
 
@@ -69,7 +69,6 @@ try:
     from fastapi.middleware.cors   import CORSMiddleware
     from fastapi.responses         import JSONResponse
     from pydantic                  import BaseModel, EmailStr, Field
-    from contextlib import asynccontextmanager
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
@@ -154,12 +153,8 @@ if FASTAPI_AVAILABLE:
         version         : str = "1.0.0"
 
 
-from contextlib import asynccontextmanager
-
-
-
 # ══════════════════════════════════════════════════════════════════════════
-#  APP FACTORY
+#  LIFESPAN — replaces deprecated @app.on_event("startup"/"shutdown")
 # ══════════════════════════════════════════════════════════════════════════
 
 @asynccontextmanager
@@ -173,9 +168,19 @@ async def lifespan(app):
     # Shutdown
     logger.info("G.O.D.S E.Y.E API shutting down.")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  APP FACTORY
+# ══════════════════════════════════════════════════════════════════════════
+
 def create_app() -> Any:
+    """
+    Creates and configures the FastAPI application.
+    Called once at module load if FastAPI is available.
+    """
     if not FASTAPI_AVAILABLE:
         return None
+
     application = FastAPI(
         title       = "G.O.D.S E.Y.E — Signal API",
         description = (
@@ -187,19 +192,20 @@ def create_app() -> Any:
         redoc_url   = "/redoc",
         lifespan    = lifespan,
     )
+
+    # ── CORS (allow dashboard and mobile app) ──────────────────────────────
     application.add_middleware(
         CORSMiddleware,
-        allow_origins     = ["*"],
+        allow_origins     = ["*"],   # tighten in production
         allow_credentials = True,
         allow_methods     = ["*"],
         allow_headers     = ["*"],
     )
+
     return application
 
 
 app = create_app()
-if app is not None:
-    app.include_router(dashboard_router, prefix="/api/dashboard")
 
 # ── Singletons ─────────────────────────────────────────────────────────────
 _auth_manager       : Optional[AuthManager]       = None
@@ -716,18 +722,7 @@ if app is not None:
         is_valid, reason = auth.validate_referral_code(code)
         return {"code": code, "valid": is_valid, "reason": reason}
 
-    # ── Startup / shutdown ────────────────────────────────────────────────
-
-    @asynccontextmanager
-    async def lifespan(app):
-        # Startup
-        logger.info("G.O.D.S E.Y.E API starting up...")
-        _ = get_auth()
-        _ = get_sub_manager()
-        logger.success("API ready. Docs at http://localhost:8080/docs")
-        yield
-        # Shutdown
-        logger.info("G.O.D.S E.Y.E API shutting down.")
+    # ── Startup/shutdown handled by the lifespan context manager above ─────
 
 
 # ══════════════════════════════════════════════════════════════════════════
