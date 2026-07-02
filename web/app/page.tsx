@@ -118,19 +118,19 @@ export default function OverviewPage() {
   }, []);
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-2 sm:gap-3 md:gap-4 lg:gap-6">
       {/* Page header */}
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-balance md:text-3xl">
+      <div className="flex flex-col gap-0.5">
+        <h1 className="text-lg font-semibold tracking-tight text-balance sm:text-xl md:text-2xl lg:text-3xl">
           Overview
         </h1>
-        <p className="text-sm text-muted-foreground">
-          Real-time snapshot of your Zodiac Godseye paper-trading engine.
+        <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground">
+          Real-time snapshot of your paper-trading engine.
         </p>
       </div>
 
       {/* Stat cards */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid grid-cols-1 gap-2 sm:gap-3 md:gap-4 lg:gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading ? (
           <>
             <StatCardSkeleton />
