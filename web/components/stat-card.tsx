@@ -1,7 +1,5 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import { ArrowUpRight, ArrowDownRight, LucideIcon } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 interface StatCardProps {
   label: string;
@@ -12,6 +10,18 @@ interface StatCardProps {
   decimals?: number;
 }
 
+function formatValue(value: number, isCurrency: boolean, decimals: number) {
+  if (isCurrency) {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: decimals,
+      minimumFractionDigits: decimals,
+    }).format(value);
+  }
+  return value.toFixed(decimals);
+}
+
 export function StatCard({
   label,
   value,
@@ -20,57 +30,22 @@ export function StatCard({
   isCurrency = false,
   decimals = 2,
 }: StatCardProps) {
-  const [displayValue, setDisplayValue] = useState(0);
-
-  useEffect(() => {
-    const duration = 800;
-    const steps = 60;
-    const stepDuration = duration / steps;
-    let currentStep = 0;
-
-    const interval = setInterval(() => {
-      currentStep++;
-      const progress = Math.min(currentStep / steps, 1);
-      setDisplayValue(value * progress);
-
-      if (progress === 1) {
-        clearInterval(interval);
-      }
-    }, stepDuration);
-
-    return () => clearInterval(interval);
-  }, [value]);
-
-  const formattedValue = isCurrency
-    ? `$${displayValue.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
-    : Math.floor(displayValue).toString();
-
   return (
-    <div className="card-hover rounded-xl border border-border bg-card p-5">
+    <div className="flex flex-col gap-1 rounded-md border border-border bg-card px-2.5 py-2 sm:px-3 sm:py-2.5">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:text-[12px]">
           {label}
         </span>
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-accent-subtle bg-accent-subtle">
-          <Icon className="h-4 w-4 text-muted" />
-        </span>
+        <Icon className="h-3 w-3 text-muted-foreground/70 sm:h-3.5 sm:w-3.5" strokeWidth={1.75} />
       </div>
-      <p className="font-mono text-2xl font-semibold tracking-tight mt-4">
-        {formattedValue}
-      </p>
-      <div
-        className={`mt-2 inline-flex items-center gap-1 text-xs font-medium ${
+      <span
+        className={cn(
+          'text-sm font-semibold tabular-nums leading-none sm:text-[18px]',
           isPositive ? 'text-positive' : 'text-negative'
-        }`}
-      >
-        {isPositive ? (
-          <ArrowUpRight className="h-3.5 w-3.5" />
-        ) : (
-          <ArrowDownRight className="h-3.5 w-3.5" />
         )}
-        {isPositive ? '+' : '-'}
-        {Math.abs(value).toFixed(decimals)}%
-      </div>
+      >
+        {formatValue(value, isCurrency, decimals)}
+      </span>
     </div>
   );
 }
