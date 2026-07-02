@@ -117,40 +117,20 @@ export default function OverviewPage() {
     fetchData();
   }, []);
 
-  const isUp = (portfolioData?.total_pnl ?? 0) >= 0;
-
   return (
-    <div className="flex flex-col gap-3 sm:gap-4">
-      {/* Page header — compact, ticker-adjacent */}
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-        <div className="flex flex-col">
-          <h1 className="text-sm font-semibold tracking-tight text-foreground sm:text-base">
-            Overview
-          </h1>
-          <p className="text-[11px] leading-tight text-muted-foreground">
-            Real-time snapshot of your paper-trading engine
-          </p>
-        </div>
-        {!loading && portfolioData && (
-          <div className="flex items-baseline gap-1.5 text-2xl sm:text-4xl font-medium tabular-nums">
-            <span
-              className={
-                isUp
-                  ? 'inline-block h-2 w-2 rounded-full bg-emerald-500'
-                  : 'inline-block h-2 w-2 rounded-full bg-red-500'
-              }
-            />
-            <span className={isUp ? 'text-emerald-600' : 'text-red-600'}>
-              {isUp ? '+' : ''}
-              {portfolioData.total_return_pct.toFixed(2)}%
-            </span>
-            <span className="text-sm sm:text-lg text-muted-foreground">overall</span>
-          </div>
-        )}
+    <div className="flex flex-col gap-2 sm:gap-3 md:gap-4 lg:gap-6">
+      {/* Page header */}
+      <div className="flex flex-col gap-0.5">
+        <h1 className="text-lg font-semibold tracking-tight text-balance sm:text-xl md:text-2xl lg:text-3xl">
+          Overview
+        </h1>
+        <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground">
+          Real-time snapshot of your paper-trading engine.
+        </p>
       </div>
 
-      {/* Stat strip — dense, single-row on desktop, 2-up on mobile */}
-      <section className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2.5">
+      {/* Stat cards */}
+      <section className="grid grid-cols-1 gap-2 sm:gap-3 md:gap-4 lg:gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {loading ? (
           <>
             <StatCardSkeleton />
@@ -194,14 +174,14 @@ export default function OverviewPage() {
             />
           </>
         ) : (
-          <div className="col-span-full py-6 text-center text-xs text-muted-foreground">
+          <div className="col-span-full text-center text-muted-foreground">
             Failed to load stats
           </div>
         )}
       </section>
 
       {/* Chart and trade summary */}
-      <section className="grid grid-cols-1 gap-2.5 lg:grid-cols-3 lg:gap-3">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {loading ? (
           <>
             <ChartSkeleton />
@@ -210,16 +190,14 @@ export default function OverviewPage() {
           </>
         ) : equityCurveData ? (
           <>
-            <div className="lg:col-span-2">
-              <EquityCurveChart data={equityCurveData.points} />
-            </div>
+            <EquityCurveChart data={equityCurveData.points} />
             <TradeSummaryCards
               bestTrade={portfolioData?.best_trade || null}
               worstTrade={portfolioData?.worst_trade || null}
             />
           </>
         ) : (
-          <div className="col-span-full py-6 text-center text-xs text-muted-foreground">
+          <div className="col-span-full text-center text-muted-foreground">
             Failed to load chart data
           </div>
         )}
