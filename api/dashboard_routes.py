@@ -702,8 +702,10 @@ class TestDashboardRoutes:
         for ep in expected:
             assert ep in paths, f"Missing route: {ep}"
 
-    def test_verify_dashboard_key_no_key_configured(self):
-        # When DASHBOARD_API_KEY is unset, any header should pass
+    def test_verify_dashboard_key_no_key_configured(self, monkeypatch):
+        # Explicitly unset DASHBOARD_API_KEY for this test, regardless
+        # of what's actually in the local .env file
+        monkeypatch.setattr("api.dashboard_routes.DASHBOARD_API_KEY", "")
         result = verify_dashboard_key(x_dashboard_key=None)
         assert result is True
 

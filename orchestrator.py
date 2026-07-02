@@ -1029,6 +1029,25 @@ def main():
     if done:
         logger.info(f"Already done today: {done}")
 
+    # ── Catch-up on startup ──────────────────────────────────────────────
+    # If the orchestrator is started mid-day (after 8:05 AM), the narrow
+    # time-window checks below would otherwise skip auth/morning_check
+    # entirely until tomorrow. Run them once immediately on launch
+    # if today is a trading day and they haven't been done yet.
+    if is_weekday():
+        if not is_done(state, "auth") and after(*SCHEDULE["auth"]):
+            logger.warning("Startup catch-up: running auth (was missed today)")
+            task_auth(state)
+        if not is_done(state, "morning_check") and after(*SCHEDULE["morning_check"]):
+            logger.warning("Startup catch-up: running morning_check (was missed today)")
+            task_morning_check(state)
+        if not is_done(state, "evening") and after(*SCHEDULE["evening_start"]) \
+           and before(*SCHEDULE["daily_report"]):
+            logger.warning("Startup catch-up: evening window already open — will run at next pass")
+        if not is_done(state, "trade") and after(*SCHEDULE["trade_step"]) \
+           and before(*SCHEDULE["daily_report"]):
+            logger.warning("Startup catch-up: trade_step window already open — will run at next pass")
+
     while True:
         if not is_weekday():
             logger.info("Weekend — sleeping 1 hour")

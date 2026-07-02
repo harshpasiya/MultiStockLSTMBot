@@ -1,5 +1,6 @@
 # Environment
 .env
+.env.local
 
 # Python
 __pycache__/
@@ -10,6 +11,7 @@ venv/
 
 # Logs
 logs/
+cumulative_delta.log
 
 # Model checkpoints
 *.pt
@@ -19,3 +21,21 @@ logs/
 # IDE
 .idea/
 *.iml
+
+# Secrets
+config/.kite_access_token
+config/.kite_instruments.json
+
+# Runtime state
+.model_cache/
+.model_reload_requested
+.orchestrator_state.json
+
+# Generated data
+data/tensors/
+
+# Node / Next.js (for web/ subproject)
+node_modules/
+.next/
+out/
+*.tsbuildinfo
