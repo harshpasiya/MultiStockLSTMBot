@@ -121,10 +121,10 @@ export default function OverviewPage() {
     <div className="flex flex-col gap-2 sm:gap-3 md:gap-4 lg:gap-6">
       {/* Page header */}
       <div className="flex flex-col gap-0.5">
-        <h1 className="text-lg font-semibold tracking-tight text-balance sm:text-xl md:text-2xl lg:text-3xl">
+        <h1 className="text-lg font-semibold tracking-tight text-balance sm:text-2xl md:text-3xl lg:text-4xl">
           Overview
         </h1>
-        <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground">
+        <p className="text-[16px] sm:text-md md:text-2md text-muted-foreground">
           Real-time snapshot of your paper-trading engine.
         </p>
       </div>
