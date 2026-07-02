@@ -259,10 +259,10 @@ export default function TradeHistoryPage() {
   const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 1024;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-3 sm:space-y-4 md:space-y-5 lg:space-y-6">
       <div>
-        <h1 className="mb-2 text-3xl font-bold text-foreground">Trade History</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="mb-1 text-2xl font-bold sm:mb-2 sm:text-3xl text-foreground">Trade History</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">
           Review all executed trades and their performance metrics
         </p>
       </div>

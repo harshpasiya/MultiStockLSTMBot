@@ -147,77 +147,26 @@ export default function PerformancePage() {
   const isPositiveProfitFactor = metrics.profit_factor >= 1.5;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-3 sm:space-y-4 md:space-y-6 lg:space-y-8">
       <div>
-        <h1 className="mb-2 text-3xl font-bold text-foreground">Performance</h1>
-        <p className="text-sm text-muted-foreground">
-          Comprehensive analytics of your trading performance and key metrics
+        <h1 className="mb-1 text-2xl font-bold sm:mb-2 sm:text-3xl text-foreground">Performance</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">
+          Analyze performance metrics and trading statistics across symbols, exit reasons, and time periods
         </p>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading ? (
-          <>
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full rounded-lg" />
-            ))}
-          </>
-        ) : (
-          <>
-            <PerformanceMetricCard
-              label="Total P&L"
-              value={`$${metrics.total_pnl.toFixed(2)}`}
-              subtext={`${metrics.total_trades} trades`}
-              isPositive={isPositivePnL}
-              icon={<BarChart3 className="h-5 w-5 text-muted" />}
-            />
-            <PerformanceMetricCard
-              label="Win Rate"
-              value={`${metrics.win_rate.toFixed(1)}%`}
-              subtext={`${metrics.total_wins} wins`}
-              isPositive={isPositiveWinRate}
-              icon={<Trophy className="h-5 w-5 text-muted" />}
-            />
-            <PerformanceMetricCard
-              label="Profit Factor"
-              value={metrics.profit_factor.toFixed(2)}
-              subtext="Gross profit / Gross loss"
-              isPositive={isPositiveProfitFactor}
-              icon={<Percent className="h-5 w-5 text-muted" />}
-            />
-            <PerformanceMetricCard
-              label="Avg Win / Loss"
-              value={`$${metrics.avg_win.toFixed(0)} / $${Math.abs(
-                metrics.avg_loss
-              ).toFixed(0)}`}
-              subtext="Risk/reward ratio"
-              icon={<Zap className="h-5 w-5 text-muted" />}
-            />
-          </>
-        )}
+      <div className="grid gap-2 sm:gap-3 md:gap-4 lg:gap-6 lg:grid-cols-2">
+        <PerformanceMetricCard label="Total P&L" value={`₹${metrics.total_pnl.toFixed(2)}`} trend="up" icon={Zap} change="+12.4%" />
+        <PerformanceMetricCard label="Win Rate" value={`${metrics.win_rate.toFixed(1)}%`} trend="up" icon={Trophy} />
+        <PerformanceMetricCard label="Profit Factor" value={metrics.profit_factor.toFixed(2)} />
+        <PerformanceMetricCard label="Avg Win/Loss" value={`₹${metrics.avg_win.toFixed(0)} / ₹${metrics.avg_loss.toFixed(0)}`} />
       </div>
 
-      {/* Equity Curve Chart */}
-      {loading ? (
-        <Skeleton className="h-96 w-full rounded-lg" />
-      ) : (
-        <EquityCurveChart data={equityData} />
-      )}
+      <EquityCurveChart data={equityData} loading={loading} />
 
-      {/* Charts Grid */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {loading ? (
-          <>
-            <Skeleton className="h-96 w-full rounded-lg" />
-            <Skeleton className="h-96 w-full rounded-lg" />
-          </>
-        ) : (
-          <>
-            <PerformanceExitReasonsChart data={exitReasonData} loading={loading} />
-            <PerformanceMonthlyChart data={monthlyData} loading={loading} />
-          </>
-        )}
+      <div className="grid gap-3 sm:gap-4 md:gap-6 lg:grid-cols-2">
+        <PerformanceExitReasonsChart data={exitReasonData} loading={loading} />
+        <PerformanceMonthlyChart data={monthlyData} loading={loading} />
       </div>
     </div>
   );

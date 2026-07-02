@@ -194,10 +194,10 @@ export default function SignalsPage() {
   const accuracyMetrics = calculateAccuracyMetrics(historySignals);
 
   return (
-    <div className="space-y-8 p-6">
+    <div className="space-y-3 sm:space-y-4 md:space-y-6 lg:space-y-8">
       <div>
-        <h1 className="mb-2 text-3xl font-bold text-foreground">Signals</h1>
-        <p className="text-sm text-muted-foreground">View trading signals from the Zodiac Godseye LSTM engine and track their accuracy</p>
+        <h1 className="mb-1 text-2xl font-bold sm:mb-2 sm:text-3xl text-foreground">Signals</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">View trading signals from the Zodiac Godseye LSTM engine and track their accuracy</p>
       </div>
 
       {/* Today's Signal Hero */}
@@ -206,19 +206,19 @@ export default function SignalsPage() {
       </section>
 
       {/* Confidence Distribution and Accuracy Metrics */}
-      <div className="grid gap-8 lg:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 md:gap-6 lg:gap-8 lg:grid-cols-3">
         <div className="lg:col-span-1">
           <ConfidenceDistributionChart data={confidenceBuckets} loading={loading} />
         </div>
         <div className="lg:col-span-2">
-          <h3 className="mb-6 text-lg font-semibold text-foreground">Signal Accuracy Analysis</h3>
+          <h3 className="mb-3 text-base sm:text-lg font-semibold text-foreground">Signal Accuracy Analysis</h3>
           <SignalAccuracyMetrics metrics={accuracyMetrics} loading={loading} />
         </div>
       </div>
 
       {/* Signal History Table */}
       <section>
-        <h3 className="mb-4 text-lg font-semibold text-foreground">Recent Signal History</h3>
+        <h3 className="mb-2 sm:mb-3 md:mb-4 text-base sm:text-lg font-semibold text-foreground">Recent Signal History</h3>
         <SignalHistoryTable signals={historySignals} loading={loading} />
       </section>
     </div>

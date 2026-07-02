@@ -223,20 +223,20 @@ export default function SubscriptionPage() {
   const currentPlan = PLANS[subscription.current_plan];
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-3 sm:space-y-4 md:space-y-6 lg:space-y-8">
       <div>
-        <h1 className="mb-2 text-3xl font-bold text-foreground">Subscription</h1>
-        <p className="text-sm text-muted-foreground">
+        <h1 className="mb-1 text-2xl font-bold sm:mb-2 sm:text-3xl text-foreground">Subscription</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">
           Manage your subscription plan and signal limits
         </p>
       </div>
 
       {/* Current Plan Card */}
-      <div className="card-hover rounded-lg border border-border bg-card p-8">
-        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="card-hover rounded-lg border border-border bg-card p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col items-start gap-2 sm:gap-3 md:gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="mb-3 flex items-center gap-3">
-              <h2 className="text-3xl font-bold text-foreground">{currentPlan.name}</h2>
+            <div className="mb-2 sm:mb-3 flex items-center gap-2 sm:gap-3">
+              <h2 className="text-2xl sm:text-3xl font-bold text-foreground">{currentPlan.name}</h2>
               <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${currentPlan.color}`}>
                 Active
               </span>
@@ -261,9 +261,9 @@ export default function SubscriptionPage() {
       </div>
 
       {/* Usage This Month */}
-      <div className="rounded-lg border border-border bg-card p-6">
-        <h3 className="mb-4 text-lg font-semibold text-foreground">Usage This Month</h3>
-        <div className="space-y-6">
+      <div className="rounded-lg border border-border bg-card p-4 sm:p-5 md:p-6">
+        <h3 className="mb-3 sm:mb-4 text-base sm:text-lg font-semibold text-foreground">Usage This Month</h3>
+        <div className="space-y-3 sm:space-y-4 md:space-y-6">
           <ProgressBar
             used={subscription.signals_today}
             limit={subscription.daily_limit}
@@ -279,8 +279,8 @@ export default function SubscriptionPage() {
 
       {/* Plans Comparison */}
       <div>
-        <h3 className="mb-4 text-lg font-semibold text-foreground">Compare Plans</h3>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <h3 className="mb-3 sm:mb-4 text-base sm:text-lg font-semibold text-foreground">Compare Plans</h3>
+        <div className="grid gap-2 sm:gap-3 md:gap-4 lg:gap-6 grid-cols-2 md:grid-cols-2 lg:grid-cols-4">
           {Object.keys(PLANS).map((planKey) => (
             <PlanCard
               key={planKey}
