@@ -215,9 +215,12 @@ export default function PositionsPage() {
 
   return (
     <div className="flex flex-col bg-background min-h-screen">
-      {/* Header Section - Compact */}
-      <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3 space-y-1.5 sm:space-y-2">
-        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground">Positions</h1>
+      {/* Header Section */}
+      <div className="px-2 sm:px-4 md:px-6 py-3 sm:py-3.5 md:py-4 space-y-2.5 sm:space-y-3 md:space-y-4 border-b border-border/30 bg-gradient-to-b from-background to-background/50">
+        <div>
+          <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground mb-0.5">Positions</h1>
+          <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground">Real-time portfolio metrics and performance</p>
+        </div>
         <PositionsSummaryStrip
           count={data.count}
           totalInvested={totalInvested}
