@@ -43,6 +43,7 @@ export function PositionsTable({ positions, loading }: PositionsTableProps) {
             <th className="px-6 py-3 text-left">Symbol</th>
             <th className="px-6 py-3 text-right">Qty</th>
             <th className="px-6 py-3 text-right">Avg Price</th>
+            <th className="px-6 py-3 text-right">Current P&L</th>
             <th className="px-6 py-3 text-right">TP</th>
             <th className="px-6 py-3 text-right">SL</th>
             <th className="px-6 py-3 text-right">Day</th>
@@ -73,6 +74,14 @@ export function PositionsTable({ positions, loading }: PositionsTableProps) {
               {/* Avg Price */}
               <td className="px-6 py-3 text-right font-mono text-muted-foreground">
                 ₹{pos.entry_price.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              </td>
+
+              {/* Current P&L */}
+              <td className="px-6 py-3 text-right font-mono">
+                <div className={pos.current_pnl >= 0 ? 'text-positive' : 'text-negative'}>
+                  ₹{Math.abs(pos.current_pnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  <span className="text-xs ml-1">({pos.current_pnl_pct > 0 ? '+' : ''}{pos.current_pnl_pct.toFixed(2)}%)</span>
+                </div>
               </td>
 
               {/* TP Price + % */}
