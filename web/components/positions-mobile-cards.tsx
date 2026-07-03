@@ -45,16 +45,16 @@ export function PositionsMobileCards({ positions, loading }: PositionsMobileCard
           {/* Line 1: Symbol + Mode + Qty */}
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-foreground text-sm">{pos.symbol}</span>
-              <span className="inline-block px-1 py-0 rounded text-[9px] font-semibold bg-accent-subtle text-muted-foreground">
+              <span className="font-semibold text-foreground text-base">{pos.symbol}</span>
+              <span className="inline-block px-1 py-0 rounded text-[13px] font-semibold bg-accent-subtle text-muted-foreground">
                 {pos.mode === 'SWING' ? 'S' : 'I'}
               </span>
             </div>
-            <span className="font-mono font-semibold text-foreground text-[10px]">{pos.quantity}</span>
+            <span className="font-mono font-semibold text-foreground text-[14px]">{pos.quantity}</span>
           </div>
 
           {/* Line 2: TP / SL / Conf / Days */}
-          <div className="flex items-center justify-between gap-1 text-[9px] font-mono">
+          <div className="flex items-center justify-between gap-1 text-[13px] font-mono">
             <div className="text-positive min-w-0">
               TP {pos.tp_pct > 0 ? '+' : ''}{pos.tp_pct.toFixed(1)}%
             </div>

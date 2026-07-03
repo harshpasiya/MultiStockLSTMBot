@@ -13,7 +13,7 @@ export function PositionsSummaryStrip({
 
   return (
     <div className="border-b border-border px-2 sm:px-4 md:px-6 py-2 sm:py-3">
-      <div className="flex flex-wrap items-center justify-start gap-2 sm:gap-4 md:gap-8 text-[11px] sm:text-sm">
+      <div className="flex flex-wrap items-center justify-start gap-2 sm:gap-4 md:gap-8 text-[15px] sm:text-base">
         <div className="flex items-baseline gap-1 sm:gap-2">
           <span className="text-muted-foreground">{count}</span>
           <span className="text-foreground font-medium">Open</span>
@@ -22,8 +22,8 @@ export function PositionsSummaryStrip({
         <div className="h-3 w-px bg-border" />
 
         <div className="flex items-baseline gap-1 sm:gap-2">
-          <span className="text-muted-foreground text-[10px] sm:text-xs">Invested</span>
-          <span className="font-mono font-semibold text-foreground text-xs sm:text-sm">
+          <span className="text-muted-foreground text-[14px] sm:text-sm">Invested</span>
+          <span className="font-mono font-semibold text-foreground text-[14px] sm:text-base">
             ₹{totalInvested.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
           </span>
         </div>
@@ -31,8 +31,8 @@ export function PositionsSummaryStrip({
         <div className="h-3 w-px bg-border" />
 
         <div className="flex items-baseline gap-1 sm:gap-2">
-          <span className="text-muted-foreground text-[10px] sm:text-xs">P&L</span>
-          <span className={`font-mono font-semibold text-xs sm:text-sm ${pnlColor}`}>
+          <span className="text-muted-foreground text-[14px] sm:text-sm">P&L</span>
+          <span className={`font-mono font-semibold text-[14px] sm:text-base ${pnlColor}`}>
             ₹{totalUnrealisedPnl.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
           </span>
         </div>
