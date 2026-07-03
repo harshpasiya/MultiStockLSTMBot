@@ -174,12 +174,14 @@ export default function PositionsPage() {
   }
 
   if (!data || data.count === 0) {
-    return (
-      <div className="flex h-screen flex-col items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="mb-2 text-4xl opacity-20">◯</div>
-          <p className="text-sm text-muted-foreground">No open positions</p>
-        </div>
+  return (
+    <div className="space-y-2 sm:space-y-3 md:space-y-4">
+      <div>
+        <h1 className="mb-0.5 text-lg font-bold sm:mb-1 sm:text-2xl md:text-3xl text-foreground">Positions</h1>
+        <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground">
+          Open positions and targets
+        </p>
+      </div>
       </div>
     );
   }
