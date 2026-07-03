@@ -215,8 +215,9 @@ export default function PositionsPage() {
 
   return (
     <div className="flex flex-col bg-background min-h-screen">
-      {/* Header Section */}
-      <div className="px-2 sm:px-4 md:px-6 py-1 sm:py-1.5 md:py-2">
+      {/* Header Section - Compact */}
+      <div className="px-2 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3 space-y-1.5 sm:space-y-2">
+        <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-foreground">Positions</h1>
         <PositionsSummaryStrip
           count={data.count}
           totalInvested={totalInvested}
