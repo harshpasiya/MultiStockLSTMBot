@@ -216,18 +216,7 @@ export default function PositionsPage() {
   return (
     <div className="flex flex-col bg-background min-h-screen">
       {/* Header Section */}
-      <div className="space-y-2 sm:space-y-2.5 md:space-y-3 px-2 sm:px-4 md:px-6 py-2 sm:py-2.5 md:py-3">
-        {/* Title Area */}
-        <div>
-          <h1 className="mb-0.5 text-lg sm:text-xl md:text-2xl font-bold text-foreground tracking-tight">
-            Positions
-          </h1>
-          <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground">
-            Active positions and performance metrics
-          </p>
-        </div>
-
-        {/* Summary Cards */}
+      <div className="px-2 sm:px-4 md:px-6 py-1 sm:py-1.5 md:py-2">
         <PositionsSummaryStrip
           count={data.count}
           totalInvested={totalInvested}

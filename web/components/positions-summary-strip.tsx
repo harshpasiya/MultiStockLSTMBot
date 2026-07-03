@@ -18,54 +18,52 @@ export function PositionsSummaryStrip({
   const isPositive = totalUnrealisedPnl >= 0;
 
   return (
-    <div className="px-2 sm:px-4 md:px-6 py-1.5 sm:py-2 md:py-2.5 bg-gradient-to-r from-accent-subtle to-transparent rounded-lg border border-border/50 shadow-sm">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 sm:gap-3 md:gap-4">
+    <div className="px-0 py-0 bg-transparent">
+      <div className="grid grid-cols-3 gap-1 sm:gap-2 md:gap-3">
         {/* Open Positions Card */}
-        <div className="rounded-lg bg-background/50 border border-border/50 p-2 sm:p-2.5 md:p-3 hover:border-border transition-colors">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] sm:text-[10px] md:text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Open Positions
+        <div className="rounded-md bg-background/30 border border-border/30 p-1.5 sm:p-2 md:p-2.5">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] md:text-[10px] font-semibold uppercase text-muted-foreground truncate">
+              Open
             </span>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground">{count}</span>
-            <span className="text-[9px] sm:text-xs md:text-xs text-muted-foreground">pos</span>
+          <div className="flex items-baseline gap-1">
+            <span className="text-lg sm:text-xl md:text-2xl font-bold text-foreground">{count}</span>
           </div>
         </div>
 
         {/* Total Invested Card */}
-        <div className="rounded-lg bg-background/50 border border-border/50 p-2 sm:p-2.5 md:p-3 hover:border-border transition-colors">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] sm:text-[10px] md:text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Total Invested
+        <div className="rounded-md bg-background/30 border border-border/30 p-1.5 sm:p-2 md:p-2.5">
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] md:text-[10px] font-semibold uppercase text-muted-foreground truncate">
+              Invested
             </span>
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="font-mono text-xl sm:text-2xl md:text-3xl font-bold text-foreground">
-              ₹{(totalInvested / 100000).toFixed(2)}
+          <div className="flex items-baseline gap-1">
+            <span className="font-mono text-lg sm:text-xl md:text-2xl font-bold text-foreground truncate">
+              ₹{(totalInvested / 100000).toFixed(2)}L
             </span>
-            <span className="text-[9px] sm:text-xs md:text-xs text-muted-foreground">L</span>
           </div>
         </div>
 
         {/* Current P&L Card */}
-        <div className={`rounded-lg ${pnlBg} border border-border/50 p-2 sm:p-2.5 md:p-3 hover:border-border transition-colors`}>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] sm:text-[10px] md:text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Current P&L
+        <div className={`rounded-md border border-border/30 p-1.5 sm:p-2 md:p-2.5 ${pnlBg.replace('/10', '/20')}`}>
+          <div className="flex items-center justify-between gap-1 mb-0.5">
+            <span className="text-[8px] sm:text-[9px] md:text-[10px] font-semibold uppercase text-muted-foreground truncate">
+              P&L
             </span>
             {isPositive ? (
-              <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 md:h-4 md:w-4 text-positive" />
+              <TrendingUp className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-positive flex-shrink-0" />
             ) : (
-              <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 md:h-4 md:w-4 text-negative" />
+              <TrendingDown className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-negative flex-shrink-0" />
             )}
           </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className={`font-mono text-xl sm:text-2xl md:text-3xl font-bold ${pnlColor}`}>
-              {isPositive ? '+' : ''} ₹{Math.abs(totalUnrealisedPnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+          <div className="flex items-baseline gap-0.5">
+            <span className={`font-mono text-lg sm:text-xl md:text-2xl font-bold ${pnlColor} truncate`}>
+              {isPositive ? '+' : ''}₹{Math.abs(totalUnrealisedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}
             </span>
-            <span className={`text-[8px] sm:text-xs md:text-xs ${pnlColor}`}>
-              ({isPositive ? '+' : ''}{(totalUnrealisedPnl > 0 ? 2.06 : -1.5).toFixed(2)}%)
+            <span className={`text-[7px] sm:text-[8px] md:text-[9px] ${pnlColor} flex-shrink-0`}>
+              {(totalUnrealisedPnl > 0 ? 2.06 : -1.5).toFixed(1)}%
             </span>
           </div>
         </div>
