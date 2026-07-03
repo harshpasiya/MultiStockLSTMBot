@@ -215,11 +215,19 @@ export default function PositionsPage() {
 
   return (
     <div className="flex flex-col bg-background min-h-screen">
-      {/* Header */}
-      <div className="border-b border-border">
-        <div className="px-6 py-4">
-          <h1 className="text-2xl font-bold text-foreground">Positions</h1>
+      {/* Header Section */}
+      <div className="space-y-3 sm:space-y-4 md:space-y-5 px-2 sm:px-4 md:px-6 py-3 sm:py-4 md:py-6">
+        {/* Title Area */}
+        <div>
+          <h1 className="mb-1 text-xl sm:text-2xl md:text-4xl font-bold text-foreground tracking-tight">
+            Positions
+          </h1>
+          <p className="text-[11px] sm:text-xs md:text-sm text-muted-foreground">
+            Monitor and manage your active trading positions in real-time
+          </p>
         </div>
+
+        {/* Summary Cards */}
         <PositionsSummaryStrip
           count={data.count}
           totalInvested={totalInvested}
