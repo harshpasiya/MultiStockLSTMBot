@@ -42,19 +42,24 @@ export function PositionsMobileCards({ positions, loading }: PositionsMobileCard
           key={pos.symbol}
           className="border border-border rounded bg-background p-2 hover:bg-accent-hover transition-colors"
         >
-          {/* Line 1: Symbol + Mode + Qty */}
+          {/* Line 1: Symbol + Mode + Qty + Current P&L */}
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-foreground text-base">{pos.symbol}</span>
-              <span className="inline-block px-1 py-0 rounded text-[13px] font-semibold bg-accent-subtle text-muted-foreground">
+              <span className="font-semibold text-foreground text-sm sm:text-base">{pos.symbol}</span>
+              <span className="inline-block px-1 py-0 rounded text-[11px] sm:text-[13px] font-semibold bg-accent-subtle text-muted-foreground">
                 {pos.mode === 'SWING' ? 'S' : 'I'}
               </span>
             </div>
-            <span className="font-mono font-semibold text-foreground text-[14px]">{pos.quantity}</span>
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="font-mono font-semibold text-foreground text-[12px] sm:text-[14px]">{pos.quantity} qty</span>
+              <span className={`font-mono font-semibold text-[11px] sm:text-[13px] ${pos.current_pnl >= 0 ? 'text-positive' : 'text-negative'}`}>
+                ₹{Math.abs(pos.current_pnl).toFixed(0)} ({pos.current_pnl_pct > 0 ? '+' : ''}{pos.current_pnl_pct.toFixed(2)}%)
+              </span>
+            </div>
           </div>
 
           {/* Line 2: TP / SL / Conf / Days */}
-          <div className="flex items-center justify-between gap-1 text-[13px] font-mono">
+          <div className="flex items-center justify-between gap-1 text-[11px] sm:text-[13px] font-mono">
             <div className="text-positive min-w-0">
               TP {pos.tp_pct > 0 ? '+' : ''}{pos.tp_pct.toFixed(1)}%
             </div>

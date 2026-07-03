@@ -8,8 +8,11 @@ import { PositionsMobileCards } from '@/components/positions-mobile-cards';
 interface Position {
   symbol: string;
   entry_price: number;
+  current_price: number;
   quantity: number;
   position_value: number;
+  current_pnl: number;
+  current_pnl_pct: number;
   tp_price: number;
   sl_price: number;
   tp_pct: number;
@@ -33,8 +36,11 @@ const MOCK_POSITIONS: PositionsResponse = {
     {
       symbol: 'AAPL',
       entry_price: 158.45,
+      current_price: 165.20,
       quantity: 25,
       position_value: 3961.25,
+      current_pnl: 168.75,
+      current_pnl_pct: 4.26,
       tp_price: 175.2,
       sl_price: 145.3,
       tp_pct: 10.59,
@@ -48,8 +54,11 @@ const MOCK_POSITIONS: PositionsResponse = {
     {
       symbol: 'MSFT',
       entry_price: 420.75,
+      current_price: 432.40,
       quantity: 15,
       position_value: 6311.25,
+      current_pnl: 174.75,
+      current_pnl_pct: 2.77,
       tp_price: 445.0,
       sl_price: 408.5,
       tp_pct: 5.77,
@@ -63,8 +72,11 @@ const MOCK_POSITIONS: PositionsResponse = {
     {
       symbol: 'NVDA',
       entry_price: 132.1,
+      current_price: 140.85,
       quantity: 40,
       position_value: 5284.0,
+      current_pnl: 350.0,
+      current_pnl_pct: 6.62,
       tp_price: 145.8,
       sl_price: 122.5,
       tp_pct: 10.40,
@@ -78,8 +90,11 @@ const MOCK_POSITIONS: PositionsResponse = {
     {
       symbol: 'TSLA',
       entry_price: 245.3,
+      current_price: 242.15,
       quantity: 20,
       position_value: 4906.0,
+      current_pnl: -63.0,
+      current_pnl_pct: -1.29,
       tp_price: 258.5,
       sl_price: 235.0,
       tp_pct: 5.36,
@@ -93,8 +108,11 @@ const MOCK_POSITIONS: PositionsResponse = {
     {
       symbol: 'GOOGL',
       entry_price: 197.8,
+      current_price: 208.15,
       quantity: 30,
       position_value: 5934.0,
+      current_pnl: 310.5,
+      current_pnl_pct: 5.23,
       tp_price: 215.2,
       sl_price: 185.5,
       tp_pct: 8.78,
@@ -108,8 +126,11 @@ const MOCK_POSITIONS: PositionsResponse = {
     {
       symbol: 'META',
       entry_price: 512.4,
+      current_price: 525.80,
       quantity: 10,
       position_value: 5124.0,
+      current_pnl: 134.0,
+      current_pnl_pct: 2.61,
       tp_price: 560.0,
       sl_price: 490.0,
       tp_pct: 9.28,
@@ -177,8 +198,8 @@ export default function PositionsPage() {
   return (
     <div className="space-y-2 sm:space-y-3 md:space-y-4">
       <div>
-        <h1 className="mb-0.5 text-xl font-bold sm:mb-1 sm:text-2xl md:text-3xl text-foreground">Positions</h1>
-        <p className="text-[14px] sm:text-sm md:text-base text-muted-foreground">
+        <h1 className="mb-0.5 text-lg font-bold sm:mb-1 sm:text-2xl md:text-3xl text-foreground">Positions</h1>
+        <p className="text-[12px] sm:text-sm md:text-base text-muted-foreground">
           Open positions and targets
         </p>
       </div>
